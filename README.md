@@ -20,7 +20,7 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/BiliDashboard.git
+git clone https://github.com/WZXsea/BiliDashboard.git
 cd BiliDashboard
 ```
 
