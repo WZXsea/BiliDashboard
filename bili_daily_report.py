@@ -19,7 +19,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORK_DIR = SCRIPT_DIR
 DATA_DIR = os.path.join(WORK_DIR, "data")
 CONFIG_FILE = os.path.join(WORK_DIR, "config.yaml")
-CRED_FILE = os.path.join(DATA_DIR, "bili_credential.json")
+CRED_DIR = os.path.join(DATA_DIR, "credentials")
+# 默认向上兼容路径
+CRED_FILE_DEFAULT = os.path.join(DATA_DIR, "bili_credential.json")
+# 运行时选定的凭据路径（由 ensure_credential 填充）
+CURRENT_CRED_FILE = None
 
 
 # ============ 通知推送 ============
@@ -112,44 +116,170 @@ def create_config_interactive(yaml):
     print(f"\n✅ 配置已保存至: {CONFIG_FILE}")
     print("   您随时可以编辑此文件来修改设置\n")
 
-# ============ B站登录授权 ============
+# ============ 多账号及登录授权 ============
 async def ensure_credential():
-    """检查凭据是否存在且有效，无效则发起二维码扫码登录"""
+    """多账号管理逻辑：询问用户是否切换，并带有 10s 超时默认登入"""
+    global CURRENT_CRED_FILE
     from bilibili_api import Credential
     
-    # 尝试加载已有凭据
-    if os.path.exists(CRED_FILE):
-        with open(CRED_FILE, "r") as f:
-            c = json.load(f)
-        cred = Credential(
-            sessdata=c.get('sessdata', ''),
-            bili_jct=c.get('bili_jct', ''),
-            buvid3=c.get('buvid3', ''),
-            dedeuserid=c.get('dedeuserid', ''),
-            ac_time_value=c.get('ac_time_value', '')
-        )
-        # 验证凭据是否有效
-        try:
-            async with httpx.AsyncClient(
-                cookies={"SESSDATA": c.get("sessdata", ""), "bili_jct": c.get("bili_jct", "")},
-                headers={"User-Agent": "Mozilla/5.0"},
-                verify=False, timeout=10.0
-            ) as client:
-                res = await client.get("https://api.bilibili.com/x/web-interface/nav")
-                data = res.json()
-                if data.get("code") == 0 and data.get("data", {}).get("isLogin"):
-                    uname = data["data"].get("uname", "未知")
-                    print(f"✅ 已登录: {uname}")
-                    return cred
-                else:
-                    print("⚠️ 凭据已过期，需要重新登录...")
-        except Exception as e:
-            print(f"⚠️ 验证凭据失败 ({e})，尝试重新登录...")
-    else:
-        print("🔐 未检测到登录凭据，需要扫码登录 B站...")
+    os.makedirs(CRED_DIR, exist_ok=True)
+    
+    # 1. 整理现有账号
+    accounts = []
+    # 检查新文件夹格式
+    if os.path.exists(CRED_DIR):
+        for f in os.listdir(CRED_DIR):
+            if f.endswith(".json"):
+                fpath = os.path.join(CRED_DIR, f)
+                try:
+                    with open(fpath, "r") as jf:
+                        c_data = json.load(jf)
+                        uname = c_data.get("uname", "")
+                        uid = c_data.get("dedeuserid", "未知UID")
+                        
+                        # 如果没有昵称（比如旧数据），尝试实时获取一下并更新文件
+                        if not uname or uname == "未知用户":
+                            print(f"⌛️ 正在查询 UID {uid} 的昵称...")
+                            uname = await fetch_uname_live(c_data.get("sessdata"), c_data.get("bili_jct"))
+                            if uname:
+                                c_data["uname"] = uname
+                                with open(fpath, "w", encoding="utf-8") as wf:
+                                    json.dump(c_data, wf, indent=2, ensure_ascii=False)
 
-    # 发起二维码扫码登录
-    return await qrcode_login()
+                        accounts.append({
+                            "name": uname or f"用户_{uid}",
+                            "uid": uid,
+                            "path": fpath
+                        })
+                except: continue
+    
+    # 检查是否有旧路径下的凭据需要迁移
+    if os.path.exists(CRED_FILE_DEFAULT) and not accounts:
+        print("发现旧版凭据，正在迁移至多账号管理目录...")
+        try:
+            with open(CRED_FILE_DEFAULT, "r") as f:
+                c = json.load(f)
+                uid = c.get('dedeuserid', 'unknown')
+                print(f"⌛️ 正在查询 UID {uid} 的昵称...")
+                uname = await fetch_uname_live(c.get("sessdata"), c.get("bili_jct"))
+                if uname: c["uname"] = uname
+                
+                new_name = f"{uid}_{uname or 'legacy'}.json"
+                new_path = os.path.join(CRED_DIR, new_name)
+                # 先写入新文件再删旧文件
+                with open(new_path, "w", encoding="utf-8") as wf:
+                    json.dump(c, wf, indent=2, ensure_ascii=False)
+                os.remove(CRED_FILE_DEFAULT)
+                accounts.append({"name": uname or "已迁移用户", "uid": uid, "path": new_path})
+        except Exception as e:
+            print(f"⚠️ 迁移失败: {e}")
+
+    # 2. 如果没有账号，直接进扫码
+    if not accounts:
+        print("🔐 未检测到任何登录凭据，需要扫码登录 B站...")
+        CURRENT_CRED_FILE = await qrcode_login()
+        return get_credential_by_path(CURRENT_CRED_FILE)
+
+    # 3. 超时选择逻辑 (10s)
+    default_acc = accounts[0] # 默认第一个（可以改进为上次运行的那个）
+    print("\n" + "="*50)
+    print("👤 多账号管理")
+    print("="*50)
+    for idx, acc in enumerate(accounts, 1):
+        print(f"  [{idx}] {acc['name']} (UID: {acc['uid']})")
+    print(f"  [N] 扫码添加新账号")
+    print("-" * 50)
+    print(f"⏰ 请按数字选择 (10秒内未输入将默认以 {default_acc['name']} 登录)...")
+
+    choice = None
+    if sys.stdin.isatty():
+        import select
+        rlist, _, _ = select.select([sys.stdin], [], [], 10)
+        if rlist:
+            choice = sys.stdin.readline().strip().upper()
+        else:
+            print("\n⏰ 已超时，自动登入默认账号。")
+    else:
+        # 非交互模式自动默认
+        print("非交互终端，跳过询问。")
+
+    # 4. 根据选择处理
+    if choice and choice != "":
+        if choice == 'N':
+            CURRENT_CRED_FILE = await qrcode_login()
+        else:
+            try:
+                sel_idx = int(choice) - 1
+                if 0 <= sel_idx < len(accounts):
+                    CURRENT_CRED_FILE = accounts[sel_idx]['path']
+                else:
+                    print("⚠️ 输入无效，使用默认账号。")
+                    CURRENT_CRED_FILE = default_acc['path']
+            except:
+                print("⚠️ 输入解析失败，使用默认账号。")
+                CURRENT_CRED_FILE = default_acc['path']
+    else:
+        CURRENT_CRED_FILE = default_acc['path']
+
+    # 5. 验证选定的账号
+    cred = get_credential_by_path(CURRENT_CRED_FILE)
+    if not cred:
+        print("❌ 凭据读取失败，尝试重新扫码...")
+        CURRENT_CRED_FILE = await qrcode_login()
+        return get_credential_by_path(CURRENT_CRED_FILE)
+        
+    # 验证是否有效
+    try:
+        async with httpx.AsyncClient(
+            cookies={"SESSDATA": getattr(cred, "sessdata", ""), "bili_jct": getattr(cred, "bili_jct", "")},
+            headers={"User-Agent": "Mozilla/5.0"},
+            verify=False, timeout=10.0
+        ) as client:
+            res = await client.get("https://api.bilibili.com/x/web-interface/nav")
+            data = res.json()
+            if data.get("code") == 0 and data.get("data", {}).get("isLogin"):
+                uname = data["data"].get("uname", "未知")
+                print(f"✅ 验证通过! 当前身份: {uname}")
+                # 顺便更新下文件里的名字，防止改名
+                with open(CURRENT_CRED_FILE, "r") as f:
+                    c_data = json.load(f)
+                    c_data['uname'] = uname
+                with open(CURRENT_CRED_FILE, "w") as f:
+                    json.dump(c_data, f, indent=2, ensure_ascii=False)
+                return cred
+            else:
+                print("⚠️ 凭据已过期，需要重新扫码登录...")
+                CURRENT_CRED_FILE = await qrcode_login()
+                return get_credential_by_path(CURRENT_CRED_FILE)
+    except Exception as e:
+        print(f"⚠️ 验证异常 ({e})，使用当前凭据继续尝试...")
+        return cred
+
+def get_credential_by_path(path):
+    from bilibili_api import Credential
+    if path and os.path.exists(path):
+        with open(path, "r") as f:
+            c = json.load(f)
+            return Credential(
+                sessdata=c.get('sessdata', ''),
+                bili_jct=c.get('bili_jct', ''),
+                buvid3=c.get('buvid3', ''),
+                dedeuserid=c.get('dedeuserid', ''),
+                ac_time_value=c.get('ac_time_value', '')
+            )
+    return None
+
+async def fetch_uname_live(sessdata, bili_jct):
+    """通过 sessdata 实时获取用户名"""
+    try:
+        async with httpx.AsyncClient(
+            cookies={"SESSDATA": sessdata, "bili_jct": bili_jct},
+            headers={"User-Agent": "Mozilla/5.0"}, verify=False, timeout=10.0
+        ) as client:
+            res = await client.get("https://api.bilibili.com/x/web-interface/nav")
+            return res.json().get("data", {}).get("uname")
+    except:
+        return None
 
 async def qrcode_login():
     """使用 B站 二维码扫码登录，获取并保存凭据"""
@@ -254,20 +384,25 @@ async def qrcode_login():
                     "ac_time_value": poll_res.cookies.get("ac_time_value", ""),
                     "refresh_token": poll_data.get("refresh_token", "")
                 }
-                
+                f
                 # 保存凭据
-                os.makedirs(DATA_DIR, exist_ok=True)
-                with open(CRED_FILE, "w", encoding="utf-8") as f:
+                os.makedirs(CRED_DIR, exist_ok=True)
+                uid = cred_data["dedeuserid"]
+                # 尝试获取用户名用于命名
+                uname = "Unknown"
+                async with httpx.AsyncClient(cookies={"SESSDATA": cred_data["sessdata"], "bili_jct": cred_data["bili_jct"]}, verify=False) as client:
+                    try:
+                        n_res = await client.get("https://api.bilibili.com/x/web-interface/nav")
+                        uname = n_res.json().get("data", {}).get("uname", f"User_{uid}")
+                    except: pass
+                
+                cred_data['uname'] = uname
+                save_path = os.path.join(CRED_DIR, f"{uid}_{uname}.json")
+                with open(save_path, "w", encoding="utf-8") as f:
                     json.dump(cred_data, f, indent=2, ensure_ascii=False)
                 
-                print(f"   凭据已保存至: {CRED_FILE}")
-                return Credential(
-                    sessdata=cred_data["sessdata"],
-                    bili_jct=cred_data["bili_jct"],
-                    buvid3=cred_data["buvid3"],
-                    dedeuserid=cred_data["dedeuserid"],
-                    ac_time_value=cred_data["ac_time_value"]
-                )
+                print(f"   凭据已分账户保存至: {save_path}")
+                return save_path
             elif code == 86038:
                 print(f"\n\n❌ 二维码已过期 (状态码: {code})")
                 sys.exit(1)
@@ -282,8 +417,9 @@ async def qrcode_login():
     sys.exit(1)
 
 def get_cookies():
-    if os.path.exists(CRED_FILE):
-        with open(CRED_FILE, "r") as f:
+    cred_path = CURRENT_CRED_FILE
+    if cred_path and os.path.exists(cred_path):
+        with open(cred_path, "r") as f:
             c = json.load(f)
             return {
                 "SESSDATA": c.get("sessdata", ""),
@@ -295,18 +431,7 @@ def get_cookies():
     return {}
 
 def get_credential():
-    from bilibili_api import Credential
-    if os.path.exists(CRED_FILE):
-        with open(CRED_FILE, "r") as f:
-            c = json.load(f)
-            return Credential(
-                sessdata=c.get('sessdata', ''),
-                bili_jct=c.get('bili_jct', ''),
-                buvid3=c.get('buvid3', ''),
-                dedeuserid=c.get('dedeuserid', ''),
-                ac_time_value=c.get('ac_time_value', '')
-            )
-    return None
+    return get_credential_by_path(CURRENT_CRED_FILE)
 
 def format_number(num):
     if num >= 10000:
