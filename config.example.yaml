@@ -1,0 +1,15 @@
+# B站早报生成器 配置文件
+# 复制此文件为 config.yaml 并填入您的信息
+# cp config.example.yaml config.yaml
+
+# Kimi AI API Key（用于生成 AI 每日总结）
+# 获取地址: https://platform.moonshot.cn/console/api-keys
+kimi_api_key: "your-kimi-api-key-here"
+
+# 追踪的 UP主/官方账号列表
+# 格式: 名称: UID
+# 例如 https://space.bilibili.com/401742377 → UID 为 401742377
+tracked_uids:
+  崩坏：星穹铁道: 1340190821
+  原神: 401742377
+  明日方舟: 161775300

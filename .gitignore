@@ -1,0 +1,23 @@
+# 运行时生成的数据
+data/
+daily_notes/
+latest_report.js
+time_trend.js
+
+# 用户配置（含敏感信息）
+config.yaml
+
+# 日志
+*.log
+*.err
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

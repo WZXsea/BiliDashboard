@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B站专属早报 Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles-v5.css">
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+</head>
+<body class="dark-mode">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <ion-icon name="tv-outline"></ion-icon> Bili Dashboard
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#overview"><ion-icon name="sparkles-outline"></ion-icon> 每日速报</a>
+                <a href="#history"><ion-icon name="footsteps-outline"></ion-icon> 历史足迹</a>
+                <a href="#hot"><ion-icon name="flame-outline"></ion-icon> 全站热门</a>
+                <a href="#tech"><ion-icon name="rocket-outline"></ion-icon> 科技动态</a>
+                <a href="#dynamic"><ion-icon name="people-circle-outline"></ion-icon> 关注动态</a>
+
+
+            </nav>
+            <div class="theme-toggle-sidebar" id="theme-toggle">
+                <ion-icon name="moon-outline" id="theme-icon"></ion-icon>
+            </div>
+        </aside>
+
+        <main class="dashboard-container">
+            <header class="header-card glass">
+                <div class="title-group">
+                    <h1 id="main-title">B站专属早报</h1>
+                    <div class="subtitle" id="report-date">2024年3月22日</div>
+                </div>
+                <div class="watch-time-card">
+                    <span class="label">昨日观看时长</span>
+                    <span class="time-val" id="watch-time-display">0分钟</span>
+                </div>
+            </header>
+
+            <div class="split-layout">
+                <section id="overview" class="ai-summary glass">
+                    <div class="ai-header">
+                        <ion-icon name="hardware-chip-outline"></ion-icon> KI 每日点评
+                    </div>
+                    <div id="ai-content" class="markdown-body">
+                        正在生成 AI 摘要...
+                    </div>
+                </section>
+
+                <section id="trend" class="grid-col flex-card glass" style="display:flex;flex-direction:column;">
+                    <div class="section-title"><ion-icon name="stats-chart-outline"></ion-icon> 最近两周观看趋势 (分钟)</div>
+                    <div style="position:relative;height:220px;flex-shrink:0;">
+                        <canvas id="watchTimeChart"></canvas>
+                    </div>
+                </section>
+            </div>
+
+            <div class="content-grid">
+                <div class="triple-grid">
+                    <section id="history" class="grid-col flex-card glass">
+                        <div class="section-title"><ion-icon name="footsteps-outline"></ion-icon> 历史足迹</div>
+                        <div id="history-list" class="media-list"></div>
+                    </section>
+                    <section id="hot" class="grid-col flex-card glass">
+                        <div class="section-title"><ion-icon name="flame-outline"></ion-icon> 全站热门</div>
+                        <div id="hot-list" class="media-list"></div>
+                    </section>
+                    <section id="tech" class="grid-col flex-card glass">
+                        <div class="section-title"><ion-icon name="rocket-outline"></ion-icon> 科技动态</div>
+                        <div id="tech-list" class="media-list"></div>
+                    </section>
+                </div>
+
+
+
+                <section id="dynamic" class="full-width">
+                    <div class="section-title" style="margin-left: 1rem;"><ion-icon name="people-outline"></ion-icon> 关注动态</div>
+                    <div id="game-container" class="game-container"></div>
+                </section>
+            </div>
+
+            <footer class="footer">
+                Bilibili Daily Dashboard &copy; 2026
+            </footer>
+        </main>
+    </div>
+
+    <!-- Data Scripts -->
+    <script src="time_trend.js"></script>
+    <script src="latest_report.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
