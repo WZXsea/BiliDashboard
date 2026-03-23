@@ -1,5 +1,7 @@
 bilibili-api-python
 httpx
-qrcode[pil]
 pyyaml
+qrcode
+Pillow
+asyncio
 urllib3

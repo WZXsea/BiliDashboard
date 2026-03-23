@@ -259,21 +259,24 @@ async def fetch_data(cred):
                     
                     mod_dyn = item.get("modules", {}).get("module_dynamic") or {}
                     desc = (mod_dyn.get("desc") or {}).get("text", "")
-                    cover = ""
+                    pics = []
                     major = mod_dyn.get("major") or {}
                     
                     if 'opus' in major:
                         opus = major.get('opus') or {}
                         if not desc: desc = (opus.get('summary') or {}).get('text', '') or opus.get('title', '')
-                        if opus.get('pics'): cover = opus['pics'][0].get('url', '')
+                        if opus.get('pics'): 
+                            pics = [p.get('url', '').replace('http:', 'https:') for p in opus['pics'][:9]]
                     elif 'archive' in major:
                         archive = major.get('archive') or {}
                         if not desc: desc = archive.get('title', '')
-                        cover = archive.get('cover', '')
+                        pics = [archive.get('cover', '').replace('http:', 'https:')]
                     
                     if not desc: desc = "分享了新内容"
                     record["posts"].append({
-                        "text": desc[:2000], "cover": cover.replace('http:', 'https:'),
+                        "text": desc[:2000], 
+                        "pics": pics,
+                        "cover": pics[0] if pics else "",
                         "url": f"https://t.bilibili.com/{item.get('id_str', '')}",
                         "time": datetime.datetime.fromtimestamp(pub_ts).strftime("%m-%d %H:%M")
                     })

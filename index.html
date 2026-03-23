@@ -3,96 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>B站专属早报 Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <title>Bilibili Daily Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="styles-v5.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
-    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
 </head>
-<body class="dark-mode">
-    <div class="app-layout">
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- 侧边栏：集成切换、导航与管理 -->
         <aside class="sidebar">
-            <div class="sidebar-logo">
-                <ion-icon name="tv-outline"></ion-icon> Bili Dashboard
+            <div class="sidebar-header">
+                <div class="logo">
+                    <ion-icon name="flash-outline" class="logo-icon"></ion-icon>
+                    <span>BiliDaily</span>
+                </div>
+                <!-- 新增：信源切换器 -->
+                <div class="source-selector">
+                    <small>快照版本</small>
+                    <select id="report-version-select">
+                        <option value="latest">Latest (实时)</option>
+                    </select>
+                </div>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#overview"><ion-icon name="sparkles-outline"></ion-icon> 每日速报</a>
-                <a href="#history"><ion-icon name="footsteps-outline"></ion-icon> 历史足迹</a>
-                <a href="#hot"><ion-icon name="flame-outline"></ion-icon> 全站热门</a>
-                <a href="#tech"><ion-icon name="rocket-outline"></ion-icon> 科技动态</a>
-                <a href="#dynamic"><ion-icon name="people-circle-outline"></ion-icon> 关注动态</a>
 
+            <nav class="nav-menu" id="sidebar-nav">
+                <!-- AI 总结 -->
+                <div class="nav-item-wrapper">
+                    <a href="#summary" class="nav-item">
+                        <ion-icon name="sparkles-outline"></ion-icon>
+                        <span>每日速报</span>
+                    </a>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-summary" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
 
+                <!-- 趋势图表 (仅开关，不导航) -->
+                <div class="nav-item-wrapper no-link">
+                    <div class="nav-item">
+                        <ion-icon name="analytics-outline"></ion-icon>
+                        <span>时长趋势</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-trend" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <!-- 历史足迹 -->
+                <div class="nav-item-wrapper">
+                    <a href="#history" class="nav-item">
+                        <ion-icon name="footsteps-outline"></ion-icon>
+                        <span>历史足迹</span>
+                    </a>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-history" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <!-- 全站热门 -->
+                <div class="nav-item-wrapper">
+                    <a href="#hot" class="nav-item">
+                        <ion-icon name="flame-outline"></ion-icon>
+                        <span>全站热门</span>
+                    </a>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-hot" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <!-- 科技动态 -->
+                <div class="nav-item-wrapper">
+                    <a href="#tech" class="nav-item">
+                        <ion-icon name="rocket-outline"></ion-icon>
+                        <span>科技动态</span>
+                    </a>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-tech" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <!-- 关注动态：含子菜单 -->
+                <div id="dynamics-nav-wrapper">
+                    <div class="nav-item-wrapper">
+                        <a href="#dynamics" class="nav-item">
+                            <ion-icon name="people-circle-outline"></ion-icon>
+                            <span>关注动态</span>
+                        </a>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-dynamics" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <!-- 子菜单容器 -->
+                    <div class="sub-nav" id="dynamics-sub-menu">
+                        <!-- 由 app.js 根据抓取结果动态生成 -->
+                    </div>
+                </div>
             </nav>
-            <div class="theme-toggle-sidebar" id="theme-toggle">
-                <ion-icon name="moon-outline" id="theme-icon"></ion-icon>
+
+            <div class="sidebar-footer">
+                <div class="user-profile">
+                    <div class="user-avatar-placeholder" id="user-avatar-initial">U</div>
+                    <div class="user-info-text">
+                        <span class="name" id="user-name">载入中...</span>
+                        <span class="status"><span class="status-dot"></span>在线</span>
+                    </div>
+                </div>
+                <div class="footer-actions">
+                    <button id="theme-toggle" class="icon-btn" title="切换主题">
+                        <ion-icon name="moon-outline" id="theme-icon"></ion-icon>
+                    </button>
+                    <div class="settings-wrapper">
+                        <button class="icon-btn" id="settings-btn" title="设置与同步">
+                            <ion-icon name="settings-outline"></ion-icon>
+                        </button>
+                        <div class="settings-popup" id="settings-popup">
+                            <div class="popup-header">控制中心</div>
+                            <ul class="popup-menu">
+                                <li id="run-report-item">
+                                    <ion-icon name="sync-circle-outline"></ion-icon>
+                                    <div class="menu-text">
+                                        <span>手动同步数据</span>
+                                        <small>复制 python3 运行指令</small>
+                                    </div>
+                                </li>
+                                <li id="open-config-item">
+                                    <ion-icon name="construct-outline"></ion-icon>
+                                    <div class="menu-text">
+                                        <span>修改监听列表</span>
+                                        <small>管理 config.yaml</small>
+                                    </div>
+                                </li>
+                                <li class="divider"></li>
+                                <li id="about-item">
+                                    <ion-icon name="information-circle-outline"></ion-icon>
+                                    <span>关于 BiliDaily</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
             </div>
         </aside>
 
-        <main class="dashboard-container">
-            <header class="header-card glass">
-                <div class="title-group">
-                    <h1 id="main-title">B站专属早报</h1>
-                    <div class="subtitle" id="report-date">2024年3月22日</div>
-                </div>
-                <div class="watch-time-card">
-                    <span class="label">昨日观看时长</span>
-                    <span class="time-val" id="watch-time-display">0分钟</span>
-                </div>
+        <!-- 主内容区 -->
+        <main class="content">
+            <header class="content-header">
+                <h1 id="current-date">--月--日 数据看板</h1>
             </header>
 
-            <div class="split-layout">
-                <section id="overview" class="ai-summary glass">
-                    <div class="ai-header">
-                        <ion-icon name="hardware-chip-outline"></ion-icon> KI 每日点评
-                    </div>
-                    <div id="ai-content" class="markdown-body">
-                        正在生成 AI 摘要...
-                    </div>
+            <div class="scroll-container">
+            <!-- 顶部核心分析区 -->
+            <div class="summary-trend-grid">
+                <!-- AI 总结 -->
+                <section id="summary" class="dashboard-section glass-card">
+                    <h2><ion-icon name="sparkles"></ion-icon> Kimi 智评</h2>
+                    <div id="summary-content" class="markdown-body">正在获取 AI 总结...</div>
                 </section>
 
-                <section id="trend" class="grid-col flex-card glass" style="display:flex;flex-direction:column;">
-                    <div class="section-title"><ion-icon name="stats-chart-outline"></ion-icon> 最近两周观看趋势 (分钟)</div>
-                    <div style="position:relative;height:220px;flex-shrink:0;">
-                        <canvas id="watchTimeChart"></canvas>
+                <!-- 趋势图表 -->
+                <section id="trend" class="dashboard-section glass-card">
+                    <h2><ion-icon name="analytics"></ion-icon> 观看时长趋势 (最近14天)</h2>
+                    <div class="chart-container">
+                        <canvas id="trendChart"></canvas>
                     </div>
-                </section>
-            </div>
-
-            <div class="content-grid">
-                <div class="triple-grid">
-                    <section id="history" class="grid-col flex-card glass">
-                        <div class="section-title"><ion-icon name="footsteps-outline"></ion-icon> 历史足迹</div>
-                        <div id="history-list" class="media-list"></div>
-                    </section>
-                    <section id="hot" class="grid-col flex-card glass">
-                        <div class="section-title"><ion-icon name="flame-outline"></ion-icon> 全站热门</div>
-                        <div id="hot-list" class="media-list"></div>
-                    </section>
-                    <section id="tech" class="grid-col flex-card glass">
-                        <div class="section-title"><ion-icon name="rocket-outline"></ion-icon> 科技动态</div>
-                        <div id="tech-list" class="media-list"></div>
-                    </section>
-                </div>
-
-
-
-                <section id="dynamic" class="full-width">
-                    <div class="section-title" style="margin-left: 1rem;"><ion-icon name="people-outline"></ion-icon> 关注动态</div>
-                    <div id="game-container" class="game-container"></div>
                 </section>
             </div>
 
-            <footer class="footer">
-                Bilibili Daily Dashboard &copy; 2026
-            </footer>
+                <!-- 历史足迹 -->
+                <section id="history" class="dashboard-section section-list">
+                    <h2><ion-icon name="footsteps"></ion-icon> 历史足迹</h2>
+                    <div id="history-list" class="media-grid horizontal-scroll"></div>
+                </section>
+
+                <!-- 热门板块 -->
+                <section id="hot" class="dashboard-section section-list">
+                    <h2><ion-icon name="flame"></ion-icon> 全站热门</h2>
+                    <div id="hot-list" class="media-grid horizontal-scroll"></div>
+                </section>
+
+                <section id="tech" class="dashboard-section section-list">
+                    <h2><ion-icon name="rocket"></ion-icon> 科技巅峰</h2>
+                    <div id="tech-list" class="media-grid horizontal-scroll"></div>
+                </section>
+
+                <!-- 关注动态 -->
+                <section id="dynamics" class="dashboard-section">
+                    <h2><ion-icon name="people-circle"></ion-icon> 关注动态</h2>
+                    <div id="game-dynamics-list" class="dynamics-grid"></div>
+                </section>
+            </div>
         </main>
     </div>
 
-    <!-- Data Scripts -->
-    <script src="time_trend.js"></script>
+    <!-- 数据源注入 (由于支持动态加载，需由 app.js 处理加载逻辑) -->
+    <script src="manifest.js"></script>
     <script src="latest_report.js"></script>
+    <script src="time_trend.js"></script>
     <script src="app.js"></script>
+
+    <!-- 全屏图片查看器 (Lightbox) -->
+    <div id="image-viewer-modal" class="image-viewer-modal">
+        <span class="close-viewer">&times;</span>
+        <img class="viewer-content" id="full-image">
+    </div>
 </body>
 </html>

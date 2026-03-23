@@ -1,234 +1,366 @@
 document.addEventListener("DOMContentLoaded", () => {
-    // Theme Toggle Logic
-    const themeBtn = document.getElementById("theme-toggle");
-    const themeIcon = document.getElementById("theme-icon");
-    const body = document.body;
-
-    const savedTheme = localStorage.getItem("biliTheme");
-    if (savedTheme === "light") {
-        body.classList.add("light-mode");
-        themeIcon.setAttribute("name", "sunny-outline");
+    // 1. 数据驱动渲染
+    if (typeof REPORT_DATA !== "undefined") {
+        renderDashboard(REPORT_DATA);
+        updateSubMenu(REPORT_DATA);
+        initReportSwitcher();
     }
 
-    if (themeBtn) {
-        themeBtn.addEventListener("click", () => {
-            body.classList.toggle("light-mode");
-            const isLight = body.classList.contains("light-mode");
-            themeIcon.setAttribute("name", isLight ? "sunny-outline" : "moon-outline");
-            localStorage.setItem("biliTheme", isLight ? "light" : "dark");
-        });
-    }
+    // 2. 状态记忆与可见性控制
+    const filters = [
+        { id: "toggle-summary", section: "summary" },
+        { id: "toggle-trend",   section: "trend" },
+        { id: "toggle-history", section: "history" },
+        { id: "toggle-hot",     section: "hot" },
+        { id: "toggle-tech",    section: "tech" },
+        { id: "toggle-dynamics",section: "dynamics" }
+    ];
 
-    if (typeof REPORT_DATA === 'undefined') {
-        console.error("REPORT_DATA is not defined.");
-        return;
-    }
-
-    // Set Header Info
-    const dateEl = document.getElementById("report-date");
-    const titleEl = document.getElementById("main-title");
-    
-    if (REPORT_DATA.date) {
-        const d = new Date(REPORT_DATA.date);
-        const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
-        dateEl.textContent = dateStr;
-        
-        if (REPORT_DATA.user_name) {
-            titleEl.textContent = `${REPORT_DATA.user_name} 的 B站一天回顾`;
+    filters.forEach(f => {
+        const toggle = document.getElementById(f.id);
+        const section = document.getElementById(f.section);
+        if (toggle && section) {
+            const saved = localStorage.getItem(f.id);
+            if (saved === "false") {
+                toggle.checked = false;
+                section.classList.add("hidden-section");
+            }
+            toggle.addEventListener("change", (e) => {
+                section.classList.toggle("hidden-section", !e.target.checked);
+                localStorage.setItem(f.id, e.target.checked);
+            });
         }
-    }
-    
-    const watchTimeEl = document.getElementById("watch-time-display");
-    if (watchTimeEl) {
-        watchTimeEl.textContent = REPORT_DATA.watch_time || "0分钟";
-    }
+    });
 
-    // AI Summary
-    const mdContainer = document.getElementById("ai-content");
-    if (REPORT_DATA.ai_summary) {
-        mdContainer.innerHTML = marked.parse(REPORT_DATA.ai_summary);
-    }
-
-    // Render Function for Lists (History, Hot, Tech)
-    const renderList = (dataArray, containerId, hasPlayCount) => {
-        const container = document.getElementById(containerId);
-        if (!dataArray || dataArray.length === 0) {
-            container.innerHTML = '<span style="color:var(--text-muted);font-size:0.9rem;">暂无数据</span>';
-            return;
-        }
-
-        container.innerHTML = dataArray.map(item => `
-            <a href="${item.url}" target="_blank" class="media-item">
-                <img src="${item.cover || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='}" loading="lazy" class="media-cover" alt="cover">
+    // 3. 全局统一卡片模板 (B站原生风格：底色透明，文字外挂)
+    function createStandardCard(v) {
+        return `
+            <a href="${v.url}" target="_blank" class="media-item">
+                <div class="media-cover-wrapper">
+                    <img src="${v.cover}" class="media-cover" alt="${v.title}" loading="lazy">
+                    <div class="media-overlay">
+                        <div class="overlay-left">
+                            ${v.play_count ? `<span><ion-icon name="play-circle-outline"></ion-icon> ${v.play_count}</span>` : ''}
+                            ${v.danmaku ? `<span><ion-icon name="chatbox-ellipses-outline"></ion-icon> ${v.danmaku}</span>` : ''}
+                        </div>
+                        <div class="overlay-right">
+                            <span>${v.duration || '--:--'}</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="media-info">
-                    <div class="media-title">${item.title}</div>
+                    <div class="media-title">${v.title}</div>
                     <div class="media-meta">
-                        <span><ion-icon name="person-outline"></ion-icon> ${item.author}</span>
-                        ${hasPlayCount && item.play_count ? `<span><ion-icon name="play-outline"></ion-icon> ${item.play_count}</span>` : ''}
+                        <span class="author">@${v.author}</span>
+                        <span class="pub-date">${v.pub_date || ''}</span>
                     </div>
                 </div>
             </a>
-        `).join('');
-    };
+        `;
+    }
 
-    renderList(REPORT_DATA.history, "history-list", false);
-    renderList(REPORT_DATA.hot, "hot-list", true);
-    renderList(REPORT_DATA.tech, "tech-list", true);
-
-    // Render Game Posts
-    const gameContainer = document.getElementById("game-container");
-    let gameHTML = "";
-    
-    REPORT_DATA.games.forEach((game, index) => {
-        const postCount = game.posts ? game.posts.length : 0;
-        const videoCount = game.videos ? game.videos.length : 0;
-        const totalUpdateCount = postCount + videoCount;
-        const sectionId = `up-section-${index}`;
-        let headerImageHTML = game.header ? `<img src="${game.header}" class="up-header-img" alt="header">` : `<div class="up-header-img placeholder" style="height: 140px; background: var(--glass-bg);"></div>`;
-
-
+    function renderDashboard(data) {
+        document.getElementById("user-name").textContent = data.user_name || "用户";
+        const avatar = document.getElementById("user-avatar-initial");
+        if (avatar) avatar.textContent = (data.user_name || "U")[0].toUpperCase();
+        document.getElementById("current-date").textContent = `${data.user_name || "用户"} 一日动态`;
         
-        let videosHTML = "";
-        if (videoCount > 0) {
-            videosHTML = `
-                <div class="up-videos-integration">
-                    <div class="integration-subtitle"><ion-icon name="videocam-outline"></ion-icon> 昨日投稿</div>
-                    <div class="mini-video-list">
-                        ${game.videos.map(vid => `
-                            <a href="${vid.url}" target="_blank" class="mini-video-item">
-                                <img src="${vid.cover}" class="mini-video-thumb">
-                                <div class="mini-video-details">
-                                    <div class="mini-video-text">${vid.text}</div>
-                                    <div class="mini-video-meta">${vid.time}</div>
-                                </div>
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
+        const summary = document.getElementById("summary-content");
+        if (summary && data.ai_summary) summary.innerHTML = marked.parse(data.ai_summary);
+
+        if (typeof TIME_TREND !== "undefined") {
+            const ctx = document.getElementById('trendChart');
+            if (ctx) {
+                if (window.myChart) window.myChart.destroy();
+                window.myChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: TIME_TREND.map(t => t.date),
+                        datasets: [{ label: '观看分钟', data: TIME_TREND.map(t => t.minutes), borderColor: '#ff758c', tension: 0.4 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
         }
 
-        let upHTML = `
-            <div class="up-section" id="${sectionId}">
-                <div class="up-header-wrapper">
-                    ${headerImageHTML}
-                    <div class="up-header-overlay">
-                        <div style="display: flex; align-items: flex-end; gap: 15px;">
-                            <img src="${game.avatar}" class="up-avatar" alt="${game.name}">
-                            <h3 class="up-title">${game.name}</h3>
-                        </div>
-                        <div class="up-meta">
-                            <span class="post-count">${totalUpdateCount} 条更新</span>
-                            <button class="collapse-btn" onclick="document.getElementById('${sectionId}').classList.toggle('collapsed')">
-                                <ion-icon name="chevron-up-outline"></ion-icon>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="up-integrated-body">
-                    ${videosHTML}
-                    <div class="up-posts-integration">
-                        <div class="integration-subtitle"><ion-icon name="chatbubbles-outline"></ion-icon> 最近动态</div>
-                        <div class="up-posts-grid">
-                            ${postCount === 0 ? `
-                                <div class="game-post" style="opacity: 0.7; grid-column: 1/-1;">
-                                    <div class="game-post-content" style="justify-content: center; align-items: center; min-height: 80px;">
-                                        <div class="game-post-text" style="text-align: center; color: var(--text-muted);">
-                                            <ion-icon name="moon-outline" style="font-size: 1.5rem; display: block; margin: 0 auto 5px;"></ion-icon>
-                                            过去 24 小时没有发布新动态
-                                        </div>
-                                    </div>
-                                </div>
-                            ` : ''}`;
+        // 全板块同步渲染
+        const sections = [
+            { id: "history-list", data: data.history, badge: false },
+            { id: "hot-list",     data: data.hot,     badge: true },
+            { id: "tech-list",    data: data.tech,    badge: true }
+        ];
 
-        game.posts.forEach(post => {
-            upHTML += `
-                <div class="game-post">
-                    ${post.cover ? `<img src="${post.cover}" class="game-post-cover" loading="lazy" alt="cover">` : ''}
-                    <div class="game-post-content">
-                        <div class="game-post-text scrollable-text">${post.text || '分享了动态/视频'}</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
-                            <div class="game-post-time" style="margin: 0;"><ion-icon name="time-outline"></ion-icon> ${post.time}</div>
-                            <a href="${post.url}" target="_blank" style="color: var(--accent); text-decoration: none; font-weight: 600;"><ion-icon name="link-outline"></ion-icon> 查看原贴</a>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        upHTML += `</div></div></div></div>`;
-        gameHTML += upHTML;
-    });
-
-
-    gameContainer.innerHTML = gameHTML;
-
-    // Render Watch Time Trend Chart
-    if (typeof TIME_TREND !== 'undefined') {
-        const ctx = document.getElementById('watchTimeChart').getContext('2d');
-        const labels = TIME_TREND.map(d => d.date);
-        const dataPts = TIME_TREND.map(d => d.minutes);
-
-        // Responsive styling depending on mode
-        const isLight = document.body.classList.contains("light-mode");
-        const gridColor = isLight ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.05)";
-        let textColor = isLight ? "#64748b" : "#94a3b8";
-        
-        // Define Chart
-        window.watchTrendChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: '观看时长 (分钟)',
-                    data: dataPts,
-                    borderColor: '#fb7299',
-                    backgroundColor: 'rgba(251, 114, 153, 0.2)',
-                    borderWidth: 3,
-                    pointBackgroundColor: '#fff',
-                    pointBorderColor: '#fb7299',
-                    pointBorderWidth: 2,
-                    pointRadius: 4,
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: 'rgba(0,0,0,0.7)',
-                        titleColor: '#fff',
-                        bodyColor: '#fff'
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        grid: { color: gridColor },
-                        ticks: { color: textColor, precision: 0 }
-                    }
-                }
+        sections.forEach(s => {
+            const el = document.getElementById(s.id);
+            if (el && s.data) {
+                el.innerHTML = s.data.map(v => createStandardCard(v)).join("");
             }
         });
 
-        // Watch theme toggles to adjust chart colors
-        themeBtn.addEventListener("click", () => {
-             const newIsLight = document.body.classList.contains("light-mode");
-             const newGridColor = newIsLight ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.05)";
-             const newTextColor = newIsLight ? "#64748b" : "#94a3b8";
-             window.watchTrendChart.options.scales.x.ticks.color = newTextColor;
-             window.watchTrendChart.options.scales.y.ticks.color = newTextColor;
-             window.watchTrendChart.options.scales.y.grid.color = newGridColor;
-             window.watchTrendChart.update();
-        });
+        // 动态区渲染
+        const dynamics = document.getElementById("dynamics-nav-wrapper") ? document.getElementById("game-dynamics-list") : null;
+        const targetDynamics = dynamics || document.getElementById("dynamics");
+        
+        if (targetDynamics && data.games) {
+            targetDynamics.innerHTML = data.games.map(g => `
+                <div id="game-${g.name}" class="up-section glass-card">
+                    <div class="up-header-wrapper">
+                        <img src="${g.header}" class="up-header-img">
+                        <div class="up-header-overlay">
+                            <a href="https://space.bilibili.com/${g.uid}" target="_blank" class="up-avatar-link">
+                                <img src="${g.avatar}" class="up-avatar">
+                            </a>
+                            <div class="up-info-text">
+                                <h3 class="up-title">${g.name}</h3>
+                                <div class="up-tab-btns">
+                                    <button class="up-tab-btn active" data-tab="posts">
+                                        <ion-icon name="chatbubble-ellipses-outline"></ion-icon> 
+                                        动态 <span class="tab-count">${g.posts.length}</span>
+                                    </button>
+                                    <button class="up-tab-btn" data-tab="videos">
+                                        <ion-icon name="play-circle-outline"></ion-icon> 
+                                        投稿 <span class="tab-count">${g.videos ? g.videos.length : 0}</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="up-meta">
+                                <div class="collapse-btn">
+                                    <ion-icon name="chevron-up-outline"></ion-icon>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="up-integrated-body">
+                        <!-- 动态视图 -->
+                        <div class="up-tab-content active" data-content="posts">
+                            <div class="up-post-list horizontal-scroll">
+                                ${g.posts.length > 0 ? g.posts.map(p => `
+                                    <div class="up-post-card">
+                                        ${p.pics && p.pics.length > 1 ? `
+                                            <div class="up-post-pics-grid grid-${p.pics.length > 4 ? 3 : (p.pics.length === 4 ? 2 : p.pics.length)}">
+                                                ${p.pics.slice(0, 9).map(pic => `<img src="${pic}" class="grid-pic" loading="lazy">`).join('')}
+                                            </div>
+                                        ` : (p.cover ? `<img src="${p.cover}" class="up-post-full-cover" loading="lazy">` : '')}
+                                        <div class="up-post-main">
+                                            <div class="up-post-scrollable">
+                                                <div class="up-post-text">${p.text}</div>
+                                            </div>
+                                            <div class="up-post-bottom">
+                                                <div class="up-post-time">
+                                                    <ion-icon name="time-outline"></ion-icon>
+                                                    <span>${p.time}</span>
+                                                </div>
+                                                <a href="${p.url}" target="_blank" class="view-original-link">
+                                                    <ion-icon name="link-outline"></ion-icon>
+                                                    查看原贴
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join("") : `
+                                    <div class="up-empty-state">
+                                        <ion-icon name="moon-outline"></ion-icon>
+                                        <p>过去 24 小时没有发布新动态</p>
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+
+                        <!-- 投稿视图 -->
+                        <div class="up-tab-content" data-content="videos">
+                            <div class="mini-video-list horizontal-scroll">
+                                ${g.videos && g.videos.length > 0 ? g.videos.map(v => `
+                                    <a href="https://www.bilibili.com/video/${v.bvid}" target="_blank" class="mini-video-item">
+                                        <img src="${v.cover}" class="mini-video-thumb">
+                                        <div class="mini-video-details">
+                                            <div class="mini-video-text">${v.title}</div>
+                                            <div class="mini-video-meta">
+                                                <span><ion-icon name="play-outline"></ion-icon>${v.play}</span>
+                                                <span>${v.time}</span>
+                                            </div>
+                                        </div>
+                                    </a>
+                                `).join("") : `
+                                    <div class="up-empty-state">
+                                        <ion-icon name="videocam-off-outline"></ion-icon>
+                                        <p>近期暂无视频投稿</p>
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join("");
+        }
     }
 
+    // 4. 主题系统：首选系统设置，其次用户记忆
+    const themeBtn = document.getElementById("theme-toggle");
+    const themeIcon = document.getElementById("theme-icon");
+    const systemThemeQuery = window.matchMedia('(prefers-color-scheme: light)');
+
+    function updateTheme(isLight) {
+        document.body.classList.toggle("light-theme", isLight);
+        themeIcon.setAttribute("name", isLight ? "moon-outline" : "sunny-outline");
+        localStorage.setItem("theme_preference", isLight ? "light" : "dark");
+    }
+
+    // 初始化逻辑：1. 检查手动记录 2. 检查系统偏好
+    const savedTheme = localStorage.getItem("theme_preference");
+    if (savedTheme) {
+        updateTheme(savedTheme === "light");
+    } else {
+        updateTheme(systemThemeQuery.matches);
+    }
+
+    // 实时监听系统主题变化
+    systemThemeQuery.addEventListener("change", (e) => {
+        if (!localStorage.getItem("theme_preference")) {
+            updateTheme(e.matches);
+        }
+    });
+
+    themeBtn.addEventListener("click", () => {
+        const currentlyLight = document.body.classList.contains("light-theme");
+        updateTheme(!currentlyLight);
+    });
+
+    // 5. 版本切换器
+    function initReportSwitcher() {
+        const sel = document.getElementById("report-version-select");
+        if (sel && typeof ALL_REPORTS !== "undefined") {
+            sel.innerHTML = ALL_REPORTS.map(r => `<option value="${r.file}" ${r.isLatest ? 'selected' : ''}>${r.time}</option>`).join("");
+            sel.addEventListener("change", (e) => {
+                const s = document.createElement("script");
+                s.src = e.target.value;
+                s.onload = () => { 
+                    if (typeof REPORT_DATA !== "undefined") {
+                        renderDashboard(REPORT_DATA); 
+                        updateSubMenu(REPORT_DATA); // 强制同步更新 UP 主二级菜单
+                    }
+                };
+                document.body.appendChild(s);
+            });
+        }
+    }
+
+    function updateSubMenu(data) {
+        const sub = document.getElementById("dynamics-sub-menu");
+        if (sub && data.games) sub.innerHTML = data.games.map(g => `<a href="#game-${g.name}" class="sub-nav-item">${g.name}</a>`).join("");
+    }
+
+    // 6. 交互：UP 部分折叠与 Tab 切换控制
+    document.addEventListener("click", (e) => {
+        // 折叠控制
+        const collapseBtn = e.target.closest(".collapse-btn");
+        if (collapseBtn) {
+            const section = collapseBtn.closest(".up-section");
+            if (section) {
+                section.classList.toggle("collapsed");
+                const icon = collapseBtn.querySelector("ion-icon");
+                if (icon) {
+                    const isCollapsed = section.classList.contains("collapsed");
+                    icon.setAttribute("name", isCollapsed ? "chevron-down-outline" : "chevron-up-outline");
+                }
+            }
+            return;
+        }
+
+        // Tab 切换控制
+        const tabBtn = e.target.closest(".up-tab-btn");
+        if (tabBtn) {
+            const tabName = tabBtn.dataset.tab;
+            const section = tabBtn.closest(".up-section");
+            if (section) {
+                // 切换按钮状态
+                section.querySelectorAll(".up-tab-btn").forEach(b => b.classList.remove("active"));
+                tabBtn.classList.add("active");
+
+                // 切换内容显隐
+                section.querySelectorAll(".up-tab-content").forEach(c => {
+                    c.classList.toggle("active", c.dataset.content === tabName);
+                });
+            }
+            return;
+        }
+
+        // 全局点击关闭设置菜单
+        if (!settingsBtn.contains(e.target) && !settingsPopup.contains(e.target)) {
+            settingsPopup.classList.remove("active");
+        }
+    });
+    
+    // 7. 设置菜单交互逻辑
+    const settingsBtn = document.getElementById("settings-btn");
+    const settingsPopup = document.getElementById("settings-popup");
+    
+    if (settingsBtn && settingsPopup) {
+        settingsBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            settingsPopup.classList.toggle("active");
+        });
+
+        // 全局点击关闭
+        document.addEventListener("click", () => {
+            settingsPopup.classList.remove("active");
+        });
+
+        // 阻止菜单内部点击关闭
+        settingsPopup.addEventListener("click", (e) => e.stopPropagation());
+
+        // 功能 1：一键复制同步指令
+        const syncBtn = document.getElementById("run-report-item");
+        if (syncBtn) {
+            syncBtn.addEventListener("click", () => {
+                const cmd = "python3 bili_daily_report.py";
+                navigator.clipboard.writeText(cmd).then(() => {
+                    alert("🚀 同步指令已成功复制到剪贴板！\n请打开您的终端 (Terminal) 粘贴运行该指令。");
+                }).catch(() => {
+                    alert("复制失败，请手动运行: " + cmd);
+                });
+                settingsPopup.classList.remove("active");
+            });
+        }
+
+        // 功能 2：修改配置引导
+        const configBtn = document.getElementById("open-config-item");
+        if (configBtn) {
+            configBtn.addEventListener("click", () => {
+                alert("⚙️ 配置文件路径：\n项目根目录下的 config.yaml\n\n请使用您的编辑器 (如 VS Code) 打开并修改监听的 UID 后，再次运行同步指令。");
+                settingsPopup.classList.remove("active");
+            });
+        }
+    }
+
+    // 8. 全屏图片查看器 (Lightbox) 交互逻辑
+    const imageViewerModal = document.getElementById("image-viewer-modal");
+    const fullImageElement = document.getElementById("full-image");
+    
+    if (imageViewerModal && fullImageElement) {
+        document.addEventListener("click", (e) => {
+            // 匹配所有可点击的图片类
+            const clickableImg = e.target.closest(".up-post-full-cover, .grid-pic, .mini-video-thumb");
+            
+            if (clickableImg) {
+                // 仅当点击图片本身时触发
+                if (e.target === clickableImg) {
+                    imageViewerModal.style.display = "flex";
+                    fullImageElement.src = clickableImg.src;
+                }
+                return;
+            }
+
+            // 关闭逻辑：点击背景或关闭按钮
+            if (e.target.classList.contains("close-viewer") || e.target === imageViewerModal) {
+                imageViewerModal.style.display = "none";
+            }
+        });
+        
+        // 按 ESC 键关闭
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                imageViewerModal.style.display = "none";
+            }
+        });
+    }
 });
