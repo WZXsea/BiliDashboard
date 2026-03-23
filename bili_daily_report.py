@@ -13,285 +13,422 @@ import platform
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ============ 路径常量 ============
+# ============ 1. 基础常量与环境声明 ============
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORK_DIR = SCRIPT_DIR
 DATA_DIR = os.path.join(WORK_DIR, "data")
 CONFIG_FILE = os.path.join(WORK_DIR, "config.yaml")
 CRED_DIR = os.path.join(DATA_DIR, "credentials")
-CRED_FILE_DEFAULT = os.path.join(DATA_DIR, "bili_credential.json")
-CURRENT_CRED_FILE = None
+CRED_FILE = os.path.join(DATA_DIR, "bili_credential.json")
 
-
-# ============ 通知推送 ============
+# ============ 2. 工具函数 ============
 def send_notification(title, message, sound="Glass"):
-    """发送 macOS 原生通知（适用于 Mac，其他系统仅打印）"""
+    """发送 macOS 原生通知"""
     if platform.system() == "Darwin":
         try:
             script = f'display notification "{message}" with title "{title}" sound name "{sound}"'
-            subprocess.run(["osascript", "-e", script], check=True, capture_output=True)
-        except Exception as e:
-            print(f"通知发送失败: {e}")
+            subprocess.run(["osascript", "-e", script], capture_output=True)
+        except: pass
     else:
-        print(f"[通知] {title}: {message}")
+        print(f"[Notice] {title}: {message}")
 
-# ============ 配置文件管理 ============
 def load_config():
-    """加载 config.yaml，不存在则引导用户创建"""
-    try:
-        import yaml
-    except ImportError:
-        print("❌ 缺少依赖 pyyaml，请先运行: pip install pyyaml")
-        sys.exit(1)
-
+    """加载配置，不存在则引导创建"""
+    import yaml
     if not os.path.exists(CONFIG_FILE):
         create_config_interactive(yaml)
-
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    return config
+        return yaml.safe_load(f)
 
 def create_config_interactive(yaml):
-    """交互式引导用户创建配置文件"""
-    print("\n" + "="*50)
-    print("🎉 欢迎使用 B站早报生成器！首次运行请配置...")
-    print("="*50)
-    print("\n📝 请输入您的 Kimi AI API Key（用于生成 AI 总结）")
-    kimi_key = input("   API Key: ").strip()
-    
-    print("\n📝 请输入追踪的 UP主（格式: 名称:UID，按回车结束输入）")
-    tracked = {}
-    while True:
-        line = input("   > ").strip()
-        if not line: break
-        if ":" in line:
-            parts = line.split(":", 1)
-            try:
-                tracked[parts[0].strip()] = int(parts[1].strip())
-            except: pass
-    
-    if not tracked:
-        tracked = {"原神": 401742377, "明日方舟": 161775300}
-        
+    print("\n" + "="*50 + "\n⚙️ 首次运行：快速初始化配置\n" + "="*50)
+    kimi_key = input("🔑 请输入您的 Kimi AI API Key: ").strip()
+    tracked = {"原神": 401742377, "明日方舟": 161775300}
     config = {"kimi_api_key": kimi_key, "tracked_uids": tracked}
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-    print(f"\n✅ 配置已保存至: {CONFIG_FILE}")
+    print(f"✅ 配置已生成！")
 
-# ============ 多账号实现 ============
+# ============ 3. 账号管理 (多账号控制中心) ============
 async def ensure_credential():
-    global CURRENT_CRED_FILE
     from bilibili_api import Credential
     os.makedirs(CRED_DIR, exist_ok=True)
     
     accounts = []
     if os.path.exists(CRED_DIR):
-        for f in os.listdir(CRED_DIR):
-            if f.endswith(".json"):
-                fpath = os.path.join(CRED_DIR, f)
-                try:
-                    mtime = os.path.getmtime(fpath)
-                    with open(fpath, "r") as jf:
-                        c_data = json.load(jf)
-                        accounts.append({
-                            "name": c_data.get("uname", "未知用户"),
-                            "uid": c_data.get("dedeuserid", "未知"),
-                            "path": fpath, "mtime": mtime
-                        })
-                except: continue
+        for f in [x for x in os.listdir(CRED_DIR) if x.endswith(".json")]:
+            fpath = os.path.join(CRED_DIR, f)
+            try:
+                with open(fpath, "r") as jf:
+                    data = json.load(jf)
+                    accounts.append({
+                        "name": data.get("uname", "未知"),
+                        "uid": data.get("dedeuserid"),
+                        "path": fpath,
+                        "mtime": os.path.getmtime(fpath)
+                    })
+            except: continue
 
     accounts.sort(key=lambda x: x['mtime'], reverse=True)
     
-    if not accounts:
-        print("🔐 未检测到登录凭据，需要扫码登录...")
-        CURRENT_CRED_FILE = await qrcode_login()
-        return get_credential_by_path(CURRENT_CRED_FILE)
+    # 引导扫码流程
+    if not accounts: return await qrcode_login()
 
-    default_acc = accounts[0]
-    print("\n" + "="*50)
-    print("👤 多账号管理")
-    print("="*50)
-    for idx, acc in enumerate(accounts, 1):
-        print(f"  [{idx}] {acc['name']} (UID: {acc['uid']})")
-    print(f"  [N] 扫码添加新账号")
-    print(f"  [D] 删除现有账号")
-    print(f"  [Q] 退出程序")
-    print("-" * 50)
-    print(f"⏰ 请输入选项 (10秒超时默认以 {default_acc['name']} 登录)...")
+    print("\n" + "-"*50 + "\n👤 请选择登录账号 (10秒超时将使用默认上次账号)\n" + "-"*50)
+    for i, acc in enumerate(accounts, 1):
+        print(f"  [{i}] {acc['name']} (UID: {acc['uid']})")
+    print("\n  [N] 扫码添加新账号\n  [D] 进入删除菜单\n  [Q] 退出程序")
 
-    choice = None
+    choice = '1'
     if sys.stdin.isatty():
         import select
-        rlist, _, _ = select.select([sys.stdin], [], [], 10)
-        if rlist: choice = sys.stdin.readline().strip().upper()
+        r, _, _ = select.select([sys.stdin], [], [], 10)
+        if r: choice = sys.stdin.readline().strip().upper()
     
-    if choice == 'Q':
-        print("\n👋 收到退出指令，脚本已终止,感谢您的使用，希望你今天也要记得做砺行。")
-        sys.exit(0)
-    elif choice == 'D':
-        await delete_account_menu(accounts)
-        return await ensure_credential()
-    elif choice == 'N':
-        CURRENT_CRED_FILE = await qrcode_login()
-    elif choice and choice.isdigit():
-        sel_idx = int(choice) - 1
-        CURRENT_CRED_FILE = accounts[sel_idx]['path'] if 0 <= sel_idx < len(accounts) else default_acc['path']
-    else:
-        CURRENT_CRED_FILE = default_acc['path']
-
-    os.utime(CURRENT_CRED_FILE, None)
-    return get_credential_by_path(CURRENT_CRED_FILE)
+    if choice == 'Q': sys.exit(0)
+    if choice == 'D': await delete_account_menu(accounts); return await ensure_credential()
+    if choice == 'N': return await qrcode_login()
+    
+    idx = int(choice)-1 if choice.isdigit() and 0 < int(choice) <= len(accounts) else 0
+    target_path = accounts[idx]['path']
+    os.utime(target_path, None) # 标记为最近活跃
+    return get_cred_from_file(target_path)
 
 async def delete_account_menu(accounts):
-    print("\n" + "x"*50 + "\n🗑  删除账号管理\n" + "x"*50)
-    for idx, acc in enumerate(accounts, 1):
-        print(f"  [{idx}] {acc['name']} (UID: {acc['uid']})")
-    print("  [B] 返回主菜单")
-    choice = input("👉 请输入要删除的账号编号: ").strip().upper()
-    if choice != 'B' and choice.isdigit():
-        idx = int(choice) - 1
-        if 0 <= idx < len(accounts):
-            confirm = input(f"❗ 确定删除 {accounts[idx]['name']}？(y/n): ").lower()
-            if confirm == 'y':
-                os.remove(accounts[idx]['path'])
-                print("✅ 已删除。")
-                await asyncio.sleep(1)
+    print("\n🗑  删除管理：请输入对应编号删除，按 B 返回。")
+    c = input("👉 ").strip().upper()
+    if c.isdigit() and 0 < int(c) <= len(accounts):
+        os.remove(accounts[int(c)-1]['path'])
+        print("✅ 已移除该账号凭据。")
 
-def get_credential_by_path(path):
+def get_cred_from_file(path):
     from bilibili_api import Credential
-    if path and os.path.exists(path):
-        with open(path, "r") as f:
-            c = json.load(f)
-            return Credential(sessdata=c.get('sessdata',''), bili_jct=c.get('bili_jct',''), buvid3=c.get('buvid3',''), dedeuserid=c.get('dedeuserid',''))
-    return None
+    with open(path, "r") as f:
+        c = json.load(f)
+        return Credential(
+            sessdata=c.get('sessdata',''),
+            bili_jct=c.get('bili_jct',''),
+            buvid3=c.get('buvid3',''),
+            dedeuserid=c.get('dedeuserid','')
+        )
 
 async def qrcode_login():
-    print("\n正在生成登录二维码...")
-    async with httpx.AsyncClient(verify=False) as client:
-        res = await client.get("https://passport.bilibili.com/x/passport-login/web/qrcode/generate")
-        qr_data = res.json()["data"]
-        qr_url, qr_key = qr_data["url"], qr_data["qrcode_key"]
+    print("\n" + "="*50 + "\n📱 开启新账号扫码登录\n" + "="*50)
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
+    async with httpx.AsyncClient(verify=False, headers=headers) as client:
+        r_json = (await client.get("https://passport.bilibili.com/x/passport-login/web/qrcode/generate")).json()
+        r = r_json.get("data", {})
+        qr_url, qr_key = r.get("url"), r.get("qrcode_key")
     
     import qrcode
     qr = qrcode.QRCode(box_size=1, border=1)
     qr.add_data(qr_url)
     qr.print_ascii(invert=True)
     
-    print("⏳ 请使用 B站手机端扫码...")
-    for _ in range(60):
+    print("⏳ 请使用 B 站手机 App 扫码...")
+    for _ in range(90):
         await asyncio.sleep(2)
-        async with httpx.AsyncClient(verify=False) as client:
-            poll = await client.get("https://passport.bilibili.com/x/passport-login/web/qrcode/poll", params={"qrcode_key": qr_key})
-            p_data = poll.json()["data"]
-            if p_data["code"] == 0:
-                uid = poll.cookies.get("DedeUserID")
-                # 获取昵称
-                async with httpx.AsyncClient(cookies=poll.cookies, verify=False) as c2:
-                    nav = await c2.get("https://api.bilibili.com/x/web-interface/nav")
-                    uname = nav.json()["data"]["uname"]
+        async with httpx.AsyncClient(verify=False, headers=headers) as client:
+            poll_res = await client.get("https://passport.bilibili.com/x/passport-login/web/qrcode/poll", params={"qrcode_key": qr_key})
+            p = poll_res.json().get("data", {})
+            if p.get("code") == 0:
+                # 扫码成功，获取详情
+                async with httpx.AsyncClient(cookies=poll_res.cookies, verify=False, headers=headers) as c2:
+                    nav = (await c2.get("https://api.bilibili.com/x/web-interface/nav")).json().get("data", {})
+                    uname, uid = nav.get("uname", "新用户"), nav.get("mid", "unknown")
                 
-                cred_data = {**poll.cookies, "uname": uname, "dedeuserid": uid, "sessdata": poll.cookies.get("SESSDATA"), "bili_jct": poll.cookies.get("bili_jct")}
+                c_data = {
+                    "sessdata": poll_res.cookies.get("SESSDATA"),
+                    "bili_jct": poll_res.cookies.get("bili_jct"),
+                    "buvid3": poll_res.cookies.get("buvid3"),
+                    "dedeuserid": str(uid),
+                    "uname": uname
+                }
                 save_path = os.path.join(CRED_DIR, f"{uid}_{uname}.json")
-                with open(save_path, "w", encoding="utf-8") as f:
-                    json.dump(cred_data, f, indent=2, ensure_ascii=False)
-                return save_path
+                with open(save_path, "w", encoding="utf-8") as f: json.dump(c_data, f, indent=2, ensure_ascii=False)
+                print(f"🎉 登录成功，欢迎: {uname}")
+                return get_cred_from_file(save_path)
+    print("❌ 扫码超时，请重试。")
     sys.exit(1)
 
-def format_number(num):
-    return f"{num/10000:.1f}万" if num >= 10000 else str(num)
+# ============ 4. 数据抓取逻辑 ============
+def format_number(num): return f"{num/10000:.1f}万" if num >= 10000 else str(num)
 
 async def fetch_data(cred):
     cookies = {"SESSDATA": cred.sessdata, "bili_jct": cred.bili_jct}
-    headers = {"User-Agent": "Mozilla/5.0"}
-    struct_data = {"history": [], "hot": [], "tech": [], "games": [], "user_name": "同学"}
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+    struct_data = {"user_name": "同学", "history": [], "hot": [], "tech": [], "games": []}
     raw_texts = []
+    
+    # 用于记录需要修正的名字
+    updated_uids = {}
+    config_changed = False
 
     async with httpx.AsyncClient(cookies=cookies, headers=headers, verify=False, timeout=30.0) as client:
-        # 0. User Info
-        nav = await client.get("https://api.bilibili.com/x/web-interface/nav")
-        struct_data["user_name"] = nav.json().get("data", {}).get("uname", "同学")
+        # 0. 用户名
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在连线 B站 获取账号详情...")
+        nav_req = await client.get("https://api.bilibili.com/x/web-interface/nav")
+        nav = nav_req.json().get("data", {})
+        struct_data["user_name"] = nav.get("uname", "同学")
+        print(f"✅ 身份识别：{struct_data['user_name']}")
+
+        # 1. 历史记录 (昨日观看时长)
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在检索您的历史足迹...")
+        hist_req = await client.get("https://api.bilibili.com/x/web-interface/history/cursor")
+        hist = hist_req.json().get("data", {}).get("list", [])
+        total_sec = 0
+        for item in hist:
+            prog, dur = item.get("progress", 0), item.get("duration", 0)
+            total_sec += dur if prog == -1 else (prog if prog > 0 else 0)
         
-        # 1. History
-        res = await client.get("https://api.bilibili.com/x/web-interface/history/cursor")
-        hist = res.json().get("data", {}).get("list", [])
-        total_min = 0
-        for i in hist:
-            p = i.get("progress", 0)
-            total_min += (i.get("duration",0) if p == -1 else p)
-        total_min //= 60
-        struct_data["history"] = [{ "title": i['title'], "author": i['author_name'], "cover": i['cover'].replace('http:','https:'), "url": f"https://bilibili.com/video/{i['history']['bvid']}"} for i in hist[:8]]
-        raw_texts.append(f"昨日观看时长: {total_min}分钟\n历史足迹: " + ", ".join([h['title'] for h in struct_data["history"][:5]]))
+        minutes_watched = total_sec // 60
+        watch_time_str = f"{minutes_watched // 60}小时 {minutes_watched % 60}分钟" if minutes_watched >= 60 else f"{minutes_watched}分钟"
+        
+        for i in hist[:8]:
+            duration_sec = i.get('duration', 0)
+            dur_str = f"{duration_sec // 60:02d}:{duration_sec % 60:02d}"
+            struct_data["history"].append({
+                "title": i.get('title', '无标题'), 
+                "author": i.get('author_name', '未知'),
+                "cover": i.get('cover', '').replace('http:', 'https:'),
+                "url": f"https://www.bilibili.com/video/{i.get('history', {}).get('bvid', '')}",
+                "duration": dur_str,
+                "play_count": "", # 历史记录通常不带播放量
+                "danmaku": "",
+                "pub_date": datetime.datetime.fromtimestamp(i.get('view_at', 0)).strftime('%m-%d')
+            })
+        print(f"📊 昨日活跃：{watch_time_str} | 已记录 {len(struct_data['history'])} 条精选记录")
+        raw_texts.append(f"昨日观看时长：{watch_time_str}\n历史简报: " + ", ".join([h['title'] for h in struct_data["history"][:5]]))
 
-        # 2. Hot
-        res = await client.get("https://api.bilibili.com/x/web-interface/popular?ps=10")
-        hot = res.json().get("data", {}).get("list", [])
-        struct_data["hot"] = [{"title": i['title'], "author": i['owner']['name'], "cover": i['pic'].replace('http:','https:'), "url": f"https://bilibili.com/video/{i['bvid']}", "play_count": format_number(i['stat']['view'])} for i in hot[:8]]
+        # 2. 全站热门与科技
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在同步全站热榜与科技区看板...")
+        for key, url, label in [("hot", "https://api.bilibili.com/x/web-interface/popular?ps=10", "全站热门"), ("tech", "https://api.bilibili.com/x/web-interface/ranking/v2?rid=188", "科技巅峰")]:
+            res = (await client.get(url)).json().get("data", {}).get("list", [])
+            for i in res[:8]:
+                stat = i.get('stat', {})
+                # 时长格式化
+                duration_sec = i.get('duration', 0)
+                dur_str = f"{duration_sec // 60:02d}:{duration_sec % 60:02d}"
+                
+                struct_data[key].append({
+                    "title": i.get('title', ''), 
+                    "author": i.get('owner', {}).get('name', ''),
+                    "cover": i.get('pic', '').replace('http:', 'https:'),
+                    "url": f"https://www.bilibili.com/video/{i.get('bvid', '')}",
+                    "play_count": format_number(stat.get('view', 0)),
+                    "danmaku": format_number(stat.get('danmaku', 0)),
+                    "duration": dur_str,
+                    "pub_date": datetime.datetime.fromtimestamp(i.get('pubdate', 0)).strftime('%m-%d')
+                })
+            print(f"🔥 {label}：已锁定前 {len(struct_data[key])} 名")
 
-        # 3. Tech
-        res = await client.get("https://api.bilibili.com/x/web-interface/ranking/v2?rid=188")
-        tech = res.json().get("data", {}).get("list", [])
-        struct_data["tech"] = [{"title": i['title'], "author": i['owner']['name'], "cover": i['pic'].replace('http:','https:'), "url": f"https://bilibili.com/video/{i['bvid']}", "play_count": format_number(i['stat']['view'])} for i in tech[:8]]
-
-        # 4. Dynamics (Simplified)
+        # 3. 关注 UP 主动态 (采用稳定版解析逻辑)
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在巡航关注列表动态...")
         from bilibili_api import user
+        now_ts = int(time.time())
         for name, uid in TRACKED_UIDS.items():
-            u = user.User(uid, credential=cred)
-            d_res = await u.get_dynamics_new()
-            u_info = await u.get_user_info()
-            game_rec = {"name": name, "avatar": u_info.get("face","").replace('http:','https:'), "header": u_info.get("top_photo","").replace('http:','https:'), "posts": []}
-            for it in d_res.get("items", [])[:3]:
-                mod = it.get("modules", {}).get("module_dynamic", {})
-                txt = mod.get("desc", {}).get("text", "新动态")
-                game_rec["posts"].append({"text": txt, "time": "近期", "url": f"https://t.bilibili.com/{it.get('id_str','')}"})
-            struct_data["games"].append(game_rec)
-            raw_texts.append(f"UP主 {name} 近期有新动态。")
+            print(f" 🛰  正在侦察: {name}...", end="", flush=True)
+            record = {"name": name, "uid": uid, "posts": [], "videos": [], "avatar": "", "header": ""}
+            try:
+                u = user.User(uid, credential=cred)
+                uinfo = await u.get_user_info()
+                
+                # 名号校验逻辑
+                real_name = uinfo.get("name")
+                if real_name and real_name != name:
+                    print(f" | 📝 更正: {name} -> {real_name}", end="", flush=True)
+                    record["name"] = real_name
+                    config_changed = True
+                    updated_uids[real_name] = uid
+                else:
+                    updated_uids[name] = uid
 
-    return struct_data, f"{total_min}分钟", total_min, "\n".join(raw_texts)
+                record["avatar"] = (uinfo.get("face") or "").replace('http:', 'https:')
+                header = uinfo.get("top_photo") or ""
+                if header and not header.startswith("http"): header = "https://i0.hdslb.com/" + header
+                record["header"] = header.replace('http:', 'https:')
 
-async def generate_summary(text):
-    if not KIMI_API_KEY: return "AI总结未配置"
+                # A. 抓取动态 (最近 24 小时)
+                dyn_res = await u.get_dynamics_new()
+                items = dyn_res.get("items", [])
+                
+                for item in items:
+                    auth = item.get("modules", {}).get("module_author") or {}
+                    pub_ts = int(auth.get("pub_ts", 0))
+                    if now_ts - pub_ts > 86400: continue
+                    
+                    mod_dyn = item.get("modules", {}).get("module_dynamic") or {}
+                    desc = (mod_dyn.get("desc") or {}).get("text", "")
+                    cover = ""
+                    major = mod_dyn.get("major") or {}
+                    
+                    if 'opus' in major:
+                        opus = major.get('opus') or {}
+                        if not desc: desc = (opus.get('summary') or {}).get('text', '') or opus.get('title', '')
+                        if opus.get('pics'): cover = opus['pics'][0].get('url', '')
+                    elif 'archive' in major:
+                        archive = major.get('archive') or {}
+                        if not desc: desc = archive.get('title', '')
+                        cover = archive.get('cover', '')
+                    
+                    if not desc: desc = "分享了新内容"
+                    record["posts"].append({
+                        "text": desc[:2000], "cover": cover.replace('http:', 'https:'),
+                        "url": f"https://t.bilibili.com/{item.get('id_str', '')}",
+                        "time": datetime.datetime.fromtimestamp(pub_ts).strftime("%m-%d %H:%M")
+                    })
+
+                # B. 抓取最近视频 (前 3 条)
+                v_res = await u.get_videos(ps=3)
+                v_list = v_res.get("list", {}).get("vlist", [])
+                for v in v_list:
+                    record["videos"].append({
+                        "title": v.get("title", ""),
+                        "cover": v.get("pic", "").replace('http:', 'https:'),
+                        "bvid": v.get("bvid", ""),
+                        "play": format_number(v.get("play", 0)),
+                        "time": datetime.datetime.fromtimestamp(v.get("created", 0)).strftime("%m-%d")
+                    })
+                
+                struct_data["games"].append(record)
+                display_name = record["name"]
+                print(f" | 📡 捕获到 {len(record['posts'])} 条动态")
+                raw_texts.append(f"UP主 {display_name} 有 {len(record['posts'])} 条新动态。")
+            except Exception as e: 
+                updated_uids[name] = uid
+                print(f" | ⚠️ 抓取跳过: {e}")
+
+    return struct_data, watch_time_str, minutes_watched, "\n".join(raw_texts), updated_uids, config_changed
+
+# ============ 5. AI 与 展示 ============
+async def generate_summary(kimi_key, text):
     try:
         async with httpx.AsyncClient(timeout=45.0, verify=False) as client:
-            res = await client.post("https://api.moonshot.cn/v1/chat/completions", headers={"Authorization": f"Bearer {KIMI_API_KEY}"}, json={"model":"kimi-k2.5","messages":[{"role":"system","content":"你是一个B站早报专家"},{"role":"user","content": f"根据以下数据总结: {text}"}]})
-            return res.json()["choices"][0]["message"]["content"]
-    except: return "AI总结生成失败"
-
-def save_dashboard_data(daily_dir, date_str, watch_time, struct_data, ai_summary):
-    data = {"date": date_str, "user_name": struct_data['user_name'], "watch_time": watch_time, "ai_summary": ai_summary, "history": struct_data['history'], "hot": struct_data['hot'], "tech": struct_data['tech'], "games": struct_data['games']}
-    with open(os.path.join(daily_dir, "latest_report.js"), "w", encoding="utf-8") as f:
-        f.write(f"const REPORT_DATA = {json.dumps(data, ensure_ascii=False)};")
+            r = await client.post("https://api.moonshot.cn/v1/chat/completions", headers={"Authorization": f"Bearer {kimi_key}"}, json={"model":"kimi-k2.5","messages":[{"role":"system","content":"你是一个幽默的B站早报撰写专家"},{"role":"user","content":f"请基于以下数据写一段300字内总结: {text}"}]})
+            return r.json()["choices"][0]["message"]["content"]
+    except: return "AI总结由于网络波动未生成。"
 
 async def main():
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] >>> B站早报脚本启动中...")
     config = load_config()
-    global KIMI_API_KEY, TRACKED_UIDS
-    KIMI_API_KEY, TRACKED_UIDS = config.get("kimi_api_key"), config.get("tracked_uids", {})
-    
+    global TRACKED_UIDS; TRACKED_UIDS = config.get("tracked_uids", {})
     cred = await ensure_credential()
-    print("正在抓取数据...")
-    struct_data, w_str, w_min, raw_txt = await fetch_data(cred)
-    ai_sum = await generate_summary(raw_txt)
     
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    daily_dir = os.path.join(WORK_DIR, "daily_notes", date_str)
-    os.makedirs(daily_dir, exist_ok=True)
+    print("🚀 正在为您拼命抓取数据...")
+    struct_data, watch_time, min_watched, raw_txt, updated_tracked, changed = await fetch_data(cred)
     
-    save_dashboard_data(daily_dir, date_str, w_str, struct_data, ai_sum)
+    # 自动同步配置
+    if changed:
+        config["tracked_uids"] = updated_tracked
+        import yaml
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        print(f"♻️ 配置已自动同步：UP主名号已更正")
+
+    ai_sum = await generate_summary(config.get("kimi_api_key"), raw_txt) if config.get("kimi_api_key") else "未配置 Kimi API。"
     
-    for asset in ["index.html", "styles-v5.css", "app.js"]:
-        if os.path.exists(os.path.join(WORK_DIR, asset)):
-            shutil.copy2(os.path.join(WORK_DIR, asset), os.path.join(daily_dir, asset))
+    # ✍️ 导出隔离备份
+    now = datetime.datetime.now()
+    date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M")
+    daily_snapshot_dir = os.path.join(WORK_DIR, "daily_notes", date_str)
+    os.makedirs(daily_snapshot_dir, exist_ok=True)
+
+    # 1. 导出 MD
+    out_md = os.path.join(daily_snapshot_dir, f"bilibili_report_{date_str}_{time_str}.md")
+    with open(out_md, "w", encoding="utf-8") as f:
+        f.write(f"# 📺 Bilibili 每日数据看板 | {date_str} ({now.strftime('%H:%M')})\n\n## 🤖 AI 点评\n{ai_sum}\n\n## 原始数据\n{raw_txt}")
     
-    print(f"✅ 完成！存档目录: {daily_dir}")
-    send_notification("B站早报已生成 ✅", f"{struct_data['user_name']}，今日回顾已就绪！", sound="Crystal")
-    subprocess.run(["open", os.path.join(daily_dir, "index.html")])
+    # 2. 导出 JS (提供最新数据给 Dashboard)
+    report_data = {**struct_data, 'date':date_str, 'watch_time':watch_time, 'ai_summary':ai_sum}
+    js_content = f"var REPORT_DATA = {json.dumps(report_data, ensure_ascii=False)};"
+    
+    # 始终更新当前最新数据
+    with open(os.path.join(daily_snapshot_dir, "latest_report.js"), "w", encoding="utf-8") as f: 
+        f.write(js_content)
+    
+    # 【新增】导出版本化数据文件
+    version_js_name = f"data_{time_str}.js"
+    with open(os.path.join(daily_snapshot_dir, version_js_name), "w", encoding="utf-8") as f:
+        f.write(js_content)
+
+    # 【新增】更新 manifest.js 清单
+    manifest_path = os.path.join(daily_snapshot_dir, "manifest.js")
+    all_reports = []
+    if os.path.exists(manifest_path):
+        try:
+            # 读取并解析已有列表，兼容 const 和 var
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                c = f.read().strip()
+                c = c.replace("const ALL_REPORTS = ", "").replace("var ALL_REPORTS = ", "").rstrip(";")
+                all_reports = json.loads(c)
+        except: pass
+    
+    # 添加新记录（去重）
+    new_entry = {"time": now.strftime("%H:%M"), "file": version_js_name, "isLatest": True}
+    for item in all_reports: item["isLatest"] = False
+    if not any(r['time'] == new_entry['time'] for r in all_reports):
+        all_reports.append(new_entry)
+    
+    all_reports.sort(key=lambda x: x['time'], reverse=True)
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        f.write(f"var ALL_REPORTS = {json.dumps(all_reports, ensure_ascii=False)};")
+
+    # 3. 更新趋势图
+    trend_file = os.path.join(DATA_DIR, "trend_history.json")
+    trends = []
+    if os.path.exists(trend_file):
+        with open(trend_file, "r") as f: trends = json.load(f)
+    short_date = date_str[-5:]
+    if trends and trends[-1]["date"] == short_date: trends[-1]["minutes"] = min_watched
+    else: trends.append({"date": short_date, "minutes": min_watched})
+    with open(trend_file, "w") as f: json.dump(trends[-14:], f)
+    with open(os.path.join(daily_snapshot_dir, "time_trend.js"), "w") as f:
+        f.write(f"var TIME_TREND = {json.dumps(trends[-14:])};")
+
+    # 4. 拷贝 Web 套件
+    for asset in ["index.html", "styles.css", "app.js"]:
+        src = os.path.join(WORK_DIR, asset)
+        if os.path.exists(src): shutil.copy2(src, os.path.join(daily_snapshot_dir, asset))
+    
+    # 【新增】同步所有历史快照的 UI (One-time or persistent Sync)
+    sync_legacy_reports()
+
+    print(f"✅ 任务完成！存档已归档：{os.path.basename(out_md)}")
+    send_notification("B站早报已就绪 ✅", f"{struct_data['user_name']}，您今日的回顾已出炉！")
+    subprocess.run(["open", os.path.join(daily_snapshot_dir, "index.html")])
+
+def sync_legacy_reports():
+    """遍历所有历史日期文件夹，同步最新的 UI 套件并修正变量声明"""
+    notes_base = os.path.join(WORK_DIR, "daily_notes")
+    if not os.path.exists(notes_base): return
+    
+    assets = ["index.html", "styles.css", "app.js"]
+    for date_dir in os.listdir(notes_base):
+        dp = os.path.join(notes_base, date_dir)
+        if not os.path.isdir(dp): continue
+        
+        # 同步静态资源
+        for a in assets:
+            src = os.path.join(WORK_DIR, a)
+            if os.path.exists(src):
+                try: shutil.copy2(src, os.path.join(dp, a))
+                except: pass
+        
+        # 修正历史 JS 文件中的声明以支持动态重载 (const -> var)
+        for f in os.listdir(dp):
+            if f.endswith(".js"):
+                fp = os.path.join(dp, f)
+                try:
+                    with open(fp, "r", encoding="utf-8") as file: content = file.read()
+                    if f == "index.html":
+                        content = content.replace("styles-v5.css", "styles.css")
+                    if "const " in content:
+                        content = content.replace("const REPORT_DATA", "var REPORT_DATA")
+                        content = content.replace("const ALL_REPORTS", "var ALL_REPORTS")
+                        content = content.replace("const TIME_TREND", "var TIME_TREND")
+                    with open(fp, "w", encoding="utf-8") as file: file.write(content)
+                except: pass
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 已退出。")
-        sys.exit(0)
-    except Exception as e:
-        print(f"❌ 错误: {e}")
-        send_notification("B站早报报错 ❌", str(e)[:50])
-        sys.exit(1)
+    try: asyncio.run(main())
+    except Exception as e: print(f"❌ 运行报错: {e}")
