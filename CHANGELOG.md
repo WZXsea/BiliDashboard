@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-23
+### Added
+- 🖱 **指哪打哪 (HoverSync)**：鼠标悬停在右侧卡片时，左侧菜单实时同步高亮并带有粉色霓虹呼吸灯效。
+- 📜 **滚动监听 (ScrollSpy)**：侧边栏自动跟随滚动状态，高亮当前视口内的内容章节或 UP 主。
+- 🎫 **抽奖过滤系统**：动态抓取新增智能识别过滤“恭喜中奖”类垃圾信息（保留本人中奖喜讯，大家一定要踊跃参与原神抽奖口呀）。
+- 🏷 **AI 模型标签**：侧边栏“每日速报”新增动态 AI 模型标识（如 KIMI, DEEPSEEK, 4O），实时展示总结大脑。
+- 🎯 **精准定位系统**：采用原生 `scrollIntoView` 与 CSS `scroll-margin` 组合方案，完美解决带特殊字符 UP 名的跳转位移问题。
+- 🎨 **粉色主题增强**：重构侧边栏滚动条样式、新增 active-nav 高亮状态及 250px 宽度平衡优化。
+
+### Changed
+- 🤖 **AI 接口插件化**：将接口预设（Provider Presets）正式整合入后端逻辑，支持 Kimi, DeepSeek 等多平台。
+- 📱 **设置面板优化**：重构配置生成器 UI，增加移动端适配及内联滚动支持。
+
+## [0.2.2] - 2026-03-23
+### Fixed
+- 📱 **UI 遮挡修复**：优化设置弹出菜单的紧凑度，增加 `max-height` 与滚动条，解决小屏幕下图标被遮挡的问题。
+- 🔄 **全量同步**：完成了 `03-23` 快照文件夹与主开发路径代码的全量实时同步。
+
+## [0.2.1] - 2026-03-23
+### Added
+- 🖼 **多图动态网格**：升级动态抓取，支持最高 9 张图片及响应式网格布局。
+- 🔍 **查看大图 (Lightbox)**：新增全屏图片查看器，支持一键放大、背景模糊及 ESC 退出。
+- 📝 **长内容支持**：抓取上限提升至 2000 字符，优化滚动条滚动。
+- 📈 支持基础观看时长趋势图表展示.
+
 ## [0.2.0] - 2026-03-23
 ### Added
 - ✨ **UI 布局**：重构章节的显示逻辑为横屏滑动。

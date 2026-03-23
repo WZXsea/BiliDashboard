@@ -68,6 +68,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const summary = document.getElementById("summary-content");
         if (summary && data.ai_summary) summary.innerHTML = marked.parse(data.ai_summary);
 
+        const modelTag = document.getElementById("ai-model-tag");
+        if (modelTag && data.ai_model) {
+            modelTag.textContent = data.ai_model.split('/').pop().toUpperCase().replace('DEEPSEEK-', '').replace('GPT-4O-', '4O-');
+        }
+
         if (typeof TIME_TREND !== "undefined") {
             const ctx = document.getElementById('trendChart');
             if (ctx) {
@@ -101,9 +106,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const dynamics = document.getElementById("dynamics-nav-wrapper") ? document.getElementById("game-dynamics-list") : null;
         const targetDynamics = dynamics || document.getElementById("dynamics");
         
+        const getSafeId = (name) => 'game-' + name.replace(/[^\w\u4e00-\u9fa5]/g, '_');
+
         if (targetDynamics && data.games) {
-            targetDynamics.innerHTML = data.games.map(g => `
-                <div id="game-${g.name}" class="up-section glass-card">
+            targetDynamics.innerHTML = data.games.map(g => {
+                const safeId = getSafeId(g.name);
+                return `
+                <div id="${safeId}" data-up-name="${g.name}" class="up-section glass-card">
                     <div class="up-header-wrapper">
                         <img src="${g.header}" class="up-header-img">
                         <div class="up-header-overlay">
@@ -190,7 +199,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         </div>
                     </div>
                 </div>
-            `).join("");
+            `;
+            }).join("");
         }
     }
 
@@ -245,8 +255,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateSubMenu(data) {
+        const getSafeId = (name) => 'game-' + name.replace(/[^\w\u4e00-\u9fa5]/g, '_');
         const sub = document.getElementById("dynamics-sub-menu");
-        if (sub && data.games) sub.innerHTML = data.games.map(g => `<a href="#game-${g.name}" class="sub-nav-item">${g.name}</a>`).join("");
+        if (sub && data.games) sub.innerHTML = data.games.map(g => {
+            const safeId = getSafeId(g.name);
+            return `<a href="#${safeId}" data-target="${safeId}" class="sub-nav-item">${g.name}</a>`;
+        }).join("");
     }
 
     // 6. 交互：UP 部分折叠与 Tab 切换控制
@@ -297,7 +311,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (settingsBtn && settingsPopup) {
         settingsBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            settingsPopup.classList.toggle("active");
+            const isActive = settingsPopup.classList.toggle("active");
+        if (isActive) {
+            settingsPopup.scrollTop = 0;
+        }
         });
 
         // 全局点击关闭
@@ -363,4 +380,138 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     }
+
+    // 9. AI 配置助手逻辑
+    const aiProviderSelect = document.getElementById("ai-provider-select");
+    const aiBaseUrlInput = document.getElementById("ai-base-url-input");
+    const aiModelInput = document.getElementById("ai-model-input");
+    const aiApiKeyInput = document.getElementById("ai-api-key-input");
+    const genYamlBtn = document.getElementById("gen-ai-yaml");
+
+    const AI_PRESETS_DATA = {
+        "kimi": { url: "https://api.moonshot.cn/v1", model: "kimi-k2.5" },
+        "deepseek": { url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+        "openai": { url: "https://api.openai.com/v1", model: "gpt-4o-mini" }
+    };
+
+    if (aiProviderSelect) {
+        aiProviderSelect.addEventListener("change", (e) => {
+            const preset = AI_PRESETS_DATA[e.target.value];
+            if (preset) {
+                aiBaseUrlInput.value = preset.url;
+                aiModelInput.value = preset.model;
+            } else {
+                aiBaseUrlInput.value = "";
+                aiModelInput.value = "";
+            }
+        });
+    }
+
+    if (genYamlBtn) {
+        genYamlBtn.addEventListener("click", () => {
+            const provider = aiProviderSelect.value;
+            const api_key = aiApiKeyInput.value || "YOUR_API_KEY";
+            const base_url = aiBaseUrlInput.value;
+            const model = aiModelInput.value;
+            
+            let yaml = "ai_config:\n";
+            if (provider !== "custom") yaml += `  provider: "${provider}"\n`;
+            yaml += `  api_key: "${api_key}"\n`;
+            if (base_url) yaml += `  base_url: "${base_url}"\n`;
+            if (model) yaml += `  model: "${model}"\n`;
+            
+            navigator.clipboard.writeText(yaml).then(() => {
+                alert("📋 已生成配置块并复制到剪贴板！\n\n请将其粘贴并替换 config.yaml 中的 ai_config 部分，然后重新运行抓取脚本。");
+            }).catch(() => {
+                alert("无法自动复制，请手动配置。");
+            });
+        });
+    }
+
+    // 10. 侧边栏联动 (ScrollSync & ScrollSpy)
+    function initScrollSync() {
+        const scrollContainer = document.querySelector('.scroll-container');
+        const navMenu = document.querySelector('.nav-menu');
+        if (!scrollContainer || !navMenu) return;
+
+        function getRelativeOffsetTop(el, container) {
+            if (!el || !container) return 0;
+            return el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+        }
+
+        function setActiveNavItem(targetId, shouldScroll = false) {
+            if (!targetId) return;
+            const decodedId = decodeURIComponent(targetId);
+            document.querySelectorAll('.nav-item-wrapper, .sub-nav-item').forEach(el => el.classList.remove('active-nav'));
+
+            const pLink = document.querySelector(`.nav-item-wrapper a[href="#${decodedId}"], .nav-item-wrapper a[href="#${targetId}"]`);
+            if (pLink) pLink.closest('.nav-item-wrapper').classList.add('active-nav');
+
+            const sLink = document.querySelector(`.sub-nav-item[href="#${targetId}"], .sub-nav-item[href="#${decodedId}"], .sub-nav-item[data-target="${decodedId}"]`);
+            if (sLink) {
+                sLink.classList.add('active-nav');
+                const dynWrapper = document.querySelector('#dynamics-nav-wrapper .nav-item-wrapper');
+                if (dynWrapper) dynWrapper.classList.add('active-nav');
+                
+                if (shouldScroll) {
+                    const itemTop = sLink.offsetTop;
+                    if (itemTop < navMenu.scrollTop + 50 || itemTop > navMenu.scrollTop + navMenu.clientHeight - 50) {
+                        navMenu.scrollTo({ top: itemTop - 100, behavior: 'smooth' });
+                    }
+                }
+            }
+        }
+
+        // 滚动监听
+        let isScrolling = false;
+        scrollContainer.addEventListener('scroll', () => {
+            isScrolling = true;
+            const sections = document.querySelectorAll('.dashboard-section, .up-section');
+            let currentId = "";
+            const scrollPos = scrollContainer.scrollTop + 150;
+
+            sections.forEach(section => {
+                const top = getRelativeOffsetTop(section, scrollContainer);
+                if (scrollPos >= top) currentId = section.id;
+            });
+
+            if (currentId) setActiveNavItem(currentId, true);
+            clearTimeout(window.scrollTimer);
+            window.scrollTimer = setTimeout(() => { isScrolling = false; }, 200);
+        });
+
+        // 悬停监听
+        document.addEventListener('mouseover', (e) => {
+            if (isScrolling) return;
+            const section = e.target.closest('.dashboard-section, .up-section');
+            if (section && section.id) setActiveNavItem(section.id, false);
+        });
+
+        // 平滑点击
+        document.addEventListener('click', (e) => {
+            const anchor = e.target.closest('a[href^="#"]');
+            if (anchor) {
+                const fullHref = anchor.getAttribute('href');
+                let tid = fullHref.startsWith('#') ? fullHref.slice(1) : "";
+                if (!tid) return;
+
+                let targetEl = document.getElementById(tid) || 
+                               (anchor.dataset.target ? document.getElementById(anchor.dataset.target) : null);
+                
+                if (!targetEl) {
+                    try { tid = decodeURIComponent(tid); targetEl = document.getElementById(tid); } catch(err) {}
+                }
+
+                if (targetEl) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    setActiveNavItem(tid, false);
+                }
+            }
+        }, true);
+    }
+
+    // 延迟初始化以确保动态内容已渲染
+    setTimeout(initScrollSync, 500);
 });

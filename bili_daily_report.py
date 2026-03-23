@@ -273,6 +273,15 @@ async def fetch_data(cred):
                         pics = [archive.get('cover', '').replace('http:', 'https:')]
                     
                     if not desc: desc = "分享了新内容"
+                    
+                    # 🚀 中奖过滤逻辑 (过滤“恭喜@xxx中奖”类干扰信息)
+                    # 规则：如果包含“恭喜”、“中奖”、“已私信”、“详情请点击抽奖”等关键词，且名字不含本用户，则剔除
+                    is_lottery = any(k in desc for k in ["中奖", "已私信通知", "详情请点击抽奖"])
+                    if "恭喜" in desc and is_lottery:
+                        my_name = struct_data.get("user_name", "同学")
+                        if my_name != "同学" and my_name not in desc:
+                            continue # 别人的中奖动态，跳过
+
                     record["posts"].append({
                         "text": desc[:2000], 
                         "pics": pics,
@@ -304,12 +313,43 @@ async def fetch_data(cred):
     return struct_data, watch_time_str, minutes_watched, "\n".join(raw_texts), updated_uids, config_changed
 
 # ============ 5. AI 与 展示 ============
-async def generate_summary(kimi_key, text):
+AI_PRESETS = {
+    "kimi": {"base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2.5"},
+    "deepseek": {"base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
+    "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"}
+}
+
+async def generate_summary(config, text):
     try:
-        async with httpx.AsyncClient(timeout=45.0, verify=False) as client:
-            r = await client.post("https://api.moonshot.cn/v1/chat/completions", headers={"Authorization": f"Bearer {kimi_key}"}, json={"model":"kimi-k2.5","messages":[{"role":"system","content":"你是一个幽默的B站早报撰写专家"},{"role":"user","content":f"请基于以下数据写一段300字内总结: {text}"}]})
-            return r.json()["choices"][0]["message"]["content"]
-    except: return "AI总结由于网络波动未生成。"
+        # 获取 AI 配置，优先使用 ai_config，支持 provider 预设
+        ai_config = config.get("ai_config", {})
+        provider = ai_config.get("provider", "").lower()
+        preset = AI_PRESETS.get(provider, {})
+
+        api_key = ai_config.get("api_key") or config.get("kimi_api_key")
+        base_url = ai_config.get("base_url") or preset.get("base_url") or "https://api.moonshot.cn/v1"
+        model = ai_config.get("model") or preset.get("model") or "kimi-k2.5"
+        
+        if not api_key: return "未配置 AI API Key。"
+
+        # 动态构造 OpenAI 兼容接口地址
+        api_url = f"{base_url.rstrip('/')}/chat/completions"
+        
+        async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "你是一个幽默的B站早报撰写专家"},
+                    {"role": "user", "content": f"请基于以下数据写一段300字内总结: {text}"}
+                ]
+            }
+            r = await client.post(api_url, headers=headers, json=payload)
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"], model
+    except Exception as e:
+        print(f"❌ AI 总结生成失败: {e}")
+        return "AI总结由于网络波动或配置错误未生成。", "Unknown"
 
 async def main():
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] >>> B站早报脚本启动中...")
@@ -328,7 +368,7 @@ async def main():
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         print(f"♻️ 配置已自动同步：UP主名号已更正")
 
-    ai_sum = await generate_summary(config.get("kimi_api_key"), raw_txt) if config.get("kimi_api_key") else "未配置 Kimi API。"
+    ai_sum, used_model = await generate_summary(config, raw_txt)
     
     # ✍️ 导出隔离备份
     now = datetime.datetime.now()
@@ -339,10 +379,10 @@ async def main():
     # 1. 导出 MD
     out_md = os.path.join(daily_snapshot_dir, f"bilibili_report_{date_str}_{time_str}.md")
     with open(out_md, "w", encoding="utf-8") as f:
-        f.write(f"# 📺 Bilibili 每日数据看板 | {date_str} ({now.strftime('%H:%M')})\n\n## 🤖 AI 点评\n{ai_sum}\n\n## 原始数据\n{raw_txt}")
+        f.write(f"# 📺 Bilibili 每日数据看板 | {date_str} ({now.strftime('%H:%M')})\n\n## 🤖 AI 点评 ({used_model})\n{ai_sum}\n\n## 原始数据\n{raw_txt}")
     
     # 2. 导出 JS (提供最新数据给 Dashboard)
-    report_data = {**struct_data, 'date':date_str, 'watch_time':watch_time, 'ai_summary':ai_sum}
+    report_data = {**struct_data, 'date':date_str, 'watch_time':watch_time, 'ai_summary':ai_sum, 'ai_model': used_model}
     js_content = f"var REPORT_DATA = {json.dumps(report_data, ensure_ascii=False)};"
     
     # 始终更新当前最新数据

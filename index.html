@@ -33,6 +33,7 @@
                     <a href="#summary" class="nav-item">
                         <ion-icon name="sparkles-outline"></ion-icon>
                         <span>每日速报</span>
+                        <span class="model-badge" id="ai-model-tag">AI</span>
                     </a>
                     <label class="switch">
                         <input type="checkbox" id="toggle-summary" checked>
@@ -41,11 +42,11 @@
                 </div>
 
                 <!-- 趋势图表 (仅开关，不导航) -->
-                <div class="nav-item-wrapper no-link">
-                    <div class="nav-item">
+                <div class="nav-item-wrapper">
+                    <a href="#trend" class="nav-item">
                         <ion-icon name="analytics-outline"></ion-icon>
                         <span>时长趋势</span>
-                    </div>
+                    </a>
                     <label class="switch">
                         <input type="checkbox" id="toggle-trend" checked>
                         <span class="slider"></span>
@@ -136,8 +137,32 @@
                                 <li id="open-config-item">
                                     <ion-icon name="construct-outline"></ion-icon>
                                     <div class="menu-text">
-                                        <span>修改监听列表</span>
+                                        <span>修改列表与配置</span>
                                         <small>管理 config.yaml</small>
+                                    </div>
+                                </li>
+                                <!-- AI 配置区域 -->
+                                <li class="menu-divider"></li>
+                                <li class="ai-config-item">
+                                    <div class="ai-config-form">
+                                        <div class="form-title">
+                                            <ion-icon name="rocket-outline"></ion-icon>
+                                            AI 供应商预设
+                                        </div>
+                                        <select id="ai-provider-select">
+                                            <option value="custom">-- 自定义 / 其他 --</option>
+                                            <option value="kimi">Kimi (Moonshot AI)</option>
+                                            <option value="deepseek">DeepSeek (深度求索)</option>
+                                            <option value="openai">ChatGPT (OpenAI)</option>
+                                        </select>
+                                        <div class="form-inputs">
+                                            <input type="text" id="ai-base-url-input" placeholder="API Endpoint (Base URL)">
+                                            <input type="text" id="ai-model-input" placeholder="模型名称 (Model)">
+                                            <input type="password" id="ai-api-key-input" placeholder="API Key (sk-...)">
+                                        </div>
+                                        <button id="gen-ai-yaml" class="gen-yaml-btn">
+                                            <ion-icon name="copy-outline"></ion-icon> 生成 YAML 配置
+                                        </button>
                                     </div>
                                 </li>
                                 <li class="divider"></li>
