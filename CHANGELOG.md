@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-03-23
+## [0.3.0] - 2026-03-27
 ### Added
+- 📈 **自适应 24h 追踪 (Adaptive History)**：重构历史记录抓取逻辑，采用 while-cursor 循环机制，自动跨越分页障碍，确保重度用户（刷几百条视频）也能精准统计 24h 观看时长。
 - 🖱 **指哪打哪 (HoverSync)**：鼠标悬停在右侧卡片时，左侧菜单实时同步高亮并带有粉色霓虹呼吸灯效。
 - 📜 **滚动监听 (ScrollSpy)**：侧边栏自动跟随滚动状态，高亮当前视口内的内容章节或 UP 主。
-- 🎫 **抽奖过滤系统**：动态抓取新增智能识别过滤“恭喜中奖”类垃圾信息（保留本人中奖喜讯，大家一定要踊跃参与原神抽奖口呀）。
+- 🎫 **抽奖过滤系统**：动态抓取新增智能识别过滤“恭喜中奖”类垃圾信息（保留本人中奖喜讯）。
 - 🏷 **AI 模型标签**：侧边栏“每日速报”新增动态 AI 模型标识（如 KIMI, DEEPSEEK, 4O），实时展示总结大脑。
 - 🎯 **精准定位系统**：采用原生 `scrollIntoView` 与 CSS `scroll-margin` 组合方案，完美解决带特殊字符 UP 名的跳转位移问题。
 - 🎨 **粉色主题增强**：重构侧边栏滚动条样式、新增 active-nav 高亮状态及 250px 宽度平衡优化。

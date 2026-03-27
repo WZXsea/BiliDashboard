@@ -172,15 +172,51 @@ async def fetch_data(cred):
         struct_data["user_name"] = nav.get("uname", "同学")
         print(f"✅ 身份识别：{struct_data['user_name']}")
 
-        # 1. 历史记录 (昨日观看时长)
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在检索您的历史足迹...")
-        hist_req = await client.get("https://api.bilibili.com/x/web-interface/history/cursor")
-        hist = hist_req.json().get("data", {}).get("list", [])
+        # 1. 历史记录 (自适应时间窗口：过去 24 小时)
+        now_ts = int(time.time())
+        cutoff_ts = now_ts - 86400
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在检索历史足迹 (时间窗口: 过去 24 小时)...")
+        
+        hist = []
+        cursor_params = {"ps": 30}
+        page_count = 0
+        
+        while page_count < 100: # 安全上限 100 页 (3000条)
+            page_count += 1
+            h_req = await client.get("https://api.bilibili.com/x/web-interface/history/cursor", params=cursor_params)
+            h_data = h_req.json().get("data", {})
+            curr_list = h_data.get("list", [])
+            if not curr_list: break
+            
+            # [DEBUG] 打印分页详情
+            p_start = datetime.datetime.fromtimestamp(curr_list[0].get("view_at")).strftime("%m-%d %H:%M")
+            p_end = datetime.datetime.fromtimestamp(curr_list[-1].get("view_at")).strftime("%m-%d %H:%M")
+            print(f"  📄 [Page {page_count}] {p_start} -> {p_end} ({len(curr_list)}个)")
+
+            all_within_window = True
+            for item in curr_list:
+                if item.get("view_at", 0) >= cutoff_ts:
+                    hist.append(item)
+                else:
+                    all_within_window = False
+                    break 
+            
+            if all_within_window:
+                last_item = curr_list[-1]
+                cursor_params = {
+                    "ps": 30,
+                    "max": last_item.get("history", {}).get("oid"),
+                    "view_at": last_item.get("view_at")
+                }
+            else:
+                break
+
         total_sec = 0
         for item in hist:
             prog, dur = item.get("progress", 0), item.get("duration", 0)
             total_sec += dur if prog == -1 else (prog if prog > 0 else 0)
         
+        print(f"🔍 [Debug] 过去 24 小时共识别到 {len(hist)} 条观看记录（翻阅 {page_count} 页）。")
         minutes_watched = total_sec // 60
         watch_time_str = f"{minutes_watched // 60}小时 {minutes_watched % 60}分钟" if minutes_watched >= 60 else f"{minutes_watched}分钟"
         
@@ -193,11 +229,12 @@ async def fetch_data(cred):
                 "cover": i.get('cover', '').replace('http:', 'https:'),
                 "url": f"https://www.bilibili.com/video/{i.get('history', {}).get('bvid', '')}",
                 "duration": dur_str,
-                "play_count": "", # 历史记录通常不带播放量
+                "play_count": "", 
                 "danmaku": "",
                 "pub_date": datetime.datetime.fromtimestamp(i.get('view_at', 0)).strftime('%m-%d')
             })
         print(f"📊 昨日活跃：{watch_time_str} | 已记录 {len(struct_data['history'])} 条精选记录")
+        
         raw_texts.append(f"昨日观看时长：{watch_time_str}\n历史简报: " + ", ".join([h['title'] for h in struct_data["history"][:5]]))
 
         # 2. 全站热门与科技
